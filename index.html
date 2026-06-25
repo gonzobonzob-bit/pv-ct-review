@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PV CT Diagnostic — Data Review</title>
+<style>
+  :root{
+    --navy:#16243f; --navy-light:#22365c;
+    --amber:#c8841a; --amber-bg:#fbf0dd;
+    --green:#2f8f4e; --green-bg:#e8f5ec;
+    --red:#c0392b; --red-bg:#fbe9e7;
+    --bg:#f3f4f6; --card:#ffffff; --ink:#1b2230; --muted:#6b7280; --line:#dfe3e8;
+    --mono:'Courier New', Courier, monospace;
+    --sans:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); padding:24px; line-height:1.45;}
+  .wrap{max-width:760px; margin:0 auto;}
+  header{background:var(--navy); color:#fff; border-radius:10px; padding:18px 22px; margin-bottom:18px;}
+  header h1{margin:0; font-size:19px;}
+  header p{margin:4px 0 0; color:#c7cfe0; font-size:12.5px;}
+
+  .upload-card{
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    padding:24px; margin-bottom:18px; text-align:center;
+  }
+  .upload-card.dragover{border-color:var(--navy); background:#f7f8fa;}
+  .upload-card input[type=file]{display:none;}
+  .upload-label{
+    display:inline-block; background:var(--navy); color:#fff; font-size:13px; font-weight:600;
+    padding:10px 18px; border-radius:6px; cursor:pointer;
+  }
+  .upload-label:hover{background:var(--navy-light);}
+  .upload-hint{font-size:12px; color:var(--muted); margin-top:10px;}
+  .filename{font-family:var(--mono); font-size:12.5px; color:var(--ink); margin-top:10px;}
+  .error-box{background:var(--red-bg); border:1px solid #ecc2bd; color:var(--red); border-radius:8px; padding:12px 16px; font-size:13px; margin-bottom:18px;}
+
+  .status-banner{border-radius:10px 10px 0 0; padding:18px 22px; color:#fff; display:flex; align-items:center; gap:14px;}
+  .status-banner.flag{background:var(--red);}
+  .status-banner.ok{background:var(--green);}
+  .status-banner .icon{font-size:30px; line-height:1;}
+  .status-banner .text h2{margin:0; font-size:19px;}
+  .status-banner .text p{margin:2px 0 0; font-size:12.5px; opacity:.9;}
+
+  .quick-section{background:var(--card); border:1px solid var(--line); border-top:none; border-radius:0 0 10px 10px; padding:4px 0 8px; margin-bottom:22px;}
+  .quick-line{display:flex; align-items:flex-start; gap:10px; padding:11px 22px; border-bottom:1px solid var(--line); text-decoration:none; color:var(--ink);}
+  .quick-line:last-child{border-bottom:none;}
+  .quick-line:hover{background:#f7f8fa;}
+  .quick-line .bullet{font-size:15px; flex-shrink:0; width:18px; text-align:center; margin-top:1px;}
+  .quick-line .bullet.issue{color:var(--red);}
+  .quick-line .bullet.confirmed{color:var(--green);}
+  .quick-line .bullet.info{color:var(--amber);}
+  .quick-line .line-text{font-size:13.5px;}
+  .quick-line .line-text b{font-weight:700;}
+  .quick-line .jump{margin-left:auto; font-size:11.5px; color:var(--muted); white-space:nowrap; padding-left:10px;}
+
+  .section-title{font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--navy); margin:0 0 12px;}
+  .detail-card{background:var(--card); border:1px solid var(--line); border-left:4px solid var(--line); border-radius:8px; padding:16px 20px; margin-bottom:14px;}
+  .detail-card.issue{border-left-color:var(--red);}
+  .detail-card.confirmed{border-left-color:var(--green);}
+  .detail-card.info{border-left-color:var(--amber);}
+  .detail-card h3{margin:0 0 10px; font-size:14.5px; display:flex; align-items:center; gap:8px;}
+  .detail-card h3 .tag{font-size:10px; text-transform:uppercase; letter-spacing:.4px; font-weight:800; padding:2px 8px; border-radius:10px;}
+  .detail-card.issue h3 .tag{background:var(--red-bg); color:var(--red);}
+  .detail-card.confirmed h3 .tag{background:var(--green-bg); color:var(--green);}
+  .detail-card.info h3 .tag{background:var(--amber-bg); color:var(--amber);}
+  .detail-card .label{font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:700; margin-top:10px;}
+  .detail-card p{margin:4px 0 0; font-size:13px;}
+
+  .meta-row{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:10px; flex-wrap:wrap; gap:6px;}
+  .meta-row b{color:var(--ink); font-family:var(--mono);}
+
+  .btnbar{display:flex; justify-content:center; margin-top:8px;}
+  button.reset{font-family:var(--sans); font-size:13px; font-weight:600; padding:9px 18px; border-radius:6px; border:1px solid var(--line); background:#fff; color:var(--muted); cursor:pointer;}
+  button.reset:hover{background:#f1f2f4; color:var(--ink);}
+
+  #results{display:none;}
+  footer{text-align:center; font-size:11px; color:var(--muted); margin-top:18px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>PV CT Diagnostic — Data Review</h1>
+    <p>Drop in a CSV export. Runs entirely in your browser — no upload to any server, no AI call.</p>
+  </header>
+
+  <div class="upload-card" id="upload-card">
+    <label class="upload-label" for="file-input">Choose CSV file</label>
+    <input type="file" id="file-input" accept=".csv">
+    <div class="upload-hint">or drag and drop a .csv file here</div>
+    <div class="filename" id="filename"></div>
+  </div>
+
+  <div id="error" class="error-box" style="display:none;"></div>
+
+  <div id="results">
+    <div class="meta-row">
+      <span>File: <b id="meta-filename">—</b></span>
+      <span>Mode: <b id="meta-mode">—</b></span>
+      <span>Points analyzed: <b id="meta-points">—</b></span>
+    </div>
+
+    <div class="status-banner" id="status-banner">
+      <div class="icon" id="status-icon">🟢</div>
+      <div class="text">
+        <h2 id="status-headline">GOOD</h2>
+        <p id="status-summary"></p>
+      </div>
+    </div>
+
+    <div class="quick-section" id="quick-lines"></div>
+
+    <div class="section-title">Detailed Findings</div>
+    <div id="detail-cards"></div>
+
+    <div class="btnbar">
+      <button class="reset" onclick="resetTool()">↺ Reset / load another file</button>
+    </div>
+  </div>
+
+  <footer>Checks: negative-PV diagnosis, Grid=Load−PV balance (when available), leg-balance, Production/Load step-change correlation (cross-talk check).</footer>
+</div>
+
+<script>
+// ---------- CSV parsing ----------
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM (common in Excel/Enphase exports)
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i+1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i+1] === '\n') i++;
+        row.push(field); field = ''; rows.push(row); row = [];
+      } else field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ''));
+}
+
+// ---------- Column detection ----------
+function detectSchema(headerRow) {
+  const norm = headerRow.map(h => h.trim().toLowerCase());
+  const findExact = (names) => norm.findIndex(h => names.includes(h));
+  const pvIdx = findExact(['pv', 'solar']);
+  const gridIdx = findExact(['grid', 'site']);
+  const loadIdx = findExact(['load', 'consumed']);
+
+  if (pvIdx !== -1 && gridIdx !== -1 && loadIdx !== -1) {
+    return { kind: 'load_with_solar', pvIdx, gridIdx, loadIdx };
+  }
+
+  // Look for two L1/L2-style pairs (Produced legs, Consumed legs) by position
+  const legIdxs = [];
+  norm.forEach((h, i) => { if (/^l1\s*\(a\)/.test(h) || /^l2\s*\(b\)/.test(h)) legIdxs.push(i); });
+  if (legIdxs.length >= 4) {
+    return { kind: 'legs_only', prodL1: legIdxs[0], prodL2: legIdxs[1], consL1: legIdxs[2], consL2: legIdxs[3] };
+  }
+  if (legIdxs.length === 2) {
+    // only one pair found - ambiguous, can't tell produced vs consumed reliably
+    return { kind: 'unknown', reason: 'Found only one L1/L2 pair, expected two (Produced + Consumed).' };
+  }
+
+  return { kind: 'unknown', reason: 'Could not find PV/Grid/Load columns or Produced/Consumed leg-pair columns.' };
+}
+
+function rowsFromCSV(text) {
+  const table = parseCSV(text);
+  if (table.length < 2) return { error: 'File has no data rows.' };
+  const header = table[0];
+  const schema = detectSchema(header);
+  if (schema.kind === 'unknown') return { error: schema.reason };
+
+  const timeIdxFound = header.findIndex(h => /date|time/i.test(h));
+  const timeIdx = timeIdxFound !== -1 ? timeIdxFound : 0; // fall back to first column — common in real exports with a blank header
+  const dataRows = table.slice(1);
+
+  const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+
+  if (schema.kind === 'load_with_solar') {
+    const points = dataRows.map(r => ({
+      time: timeIdx !== -1 ? r[timeIdx] : '',
+      pv: num(r[schema.pvIdx]),
+      grid: num(r[schema.gridIdx]),
+      load: num(r[schema.loadIdx]),
+    })).filter(p => p.pv !== null && p.grid !== null && p.load !== null);
+    return { mode: 'load_with_solar', points };
+  }
+
+  if (schema.kind === 'legs_only') {
+    const points = dataRows.map(r => {
+      const p1 = num(r[schema.prodL1]), p2 = num(r[schema.prodL2]);
+      const c1 = num(r[schema.consL1]), c2 = num(r[schema.consL2]);
+      if (p1 === null || p2 === null || c1 === null || c2 === null) return null;
+      return { time: timeIdx !== -1 ? r[timeIdx] : '', pv: p1 + p2, grid: null, load: c1 + c2, p1, p2, c1, c2 };
+    }).filter(Boolean);
+    return { mode: 'legs_only', points };
+  }
+}
+
+// ---------- Core stats (ported from diagnostics.ts) ----------
+function pearson(xs, ys) {
+  const n = xs.length;
+  if (n < 2 || n !== ys.length) return null;
+  const mx = xs.reduce((a,b)=>a+b,0)/n, my = ys.reduce((a,b)=>a+b,0)/n;
+  let num=0, dx2=0, dy2=0;
+  for (let i=0;i<n;i++){ const dx=xs[i]-mx, dy=ys[i]-my; num+=dx*dy; dx2+=dx*dx; dy2+=dy*dy; }
+  const den = Math.sqrt(dx2*dy2);
+  return den===0 ? null : num/den;
+}
+function differencedCorrelation(xs, ys) {
+  if (xs.length < 3) return null;
+  const dxs = xs.slice(1).map((v,i)=>v-xs[i]);
+  const dys = ys.slice(1).map((v,i)=>v-ys[i]);
+  return pearson(dxs, dys);
+}
+function checkBalance(points, tolerancePct=10, toleranceFloorW=150) {
+  return points.filter(p=>p.load!==null).map(p=>{
+    const expected = p.load - p.pv;
+    const deviation = p.grid - expected;
+    const tol = Math.max(toleranceFloorW, (tolerancePct/100)*Math.abs(expected));
+    return { time:p.time, expected, actual:p.grid, deviation, flagged: Math.abs(deviation) > tol };
+  });
+}
+function checkNegativePV(points, threshold=-50) {
+  return points.filter(p=>p.pv<threshold).map(p=>({
+    time:p.time, pv:p.pv, grid:p.grid,
+    diagnosis: (p.grid!==null && p.grid<=0) ? 'offset_zero_cal' : 'polarity_offset'
+  }));
+}
+function signConsistency(deviations) {
+  const signs = deviations.map(d=>Math.sign(d)).filter(s=>s!==0);
+  const posFrac = signs.length ? signs.filter(s=>s===1).length/signs.length : 0.5;
+  return { n: signs.length, posFrac, consistent: signs.length>=3 && (posFrac>=0.8||posFrac<=0.2) };
+}
+function ratioConsistency(pairs, minExpectedAbs=200) {
+  const filtered = pairs.filter(p=>Math.abs(p.expected)>minExpectedAbs);
+  if (filtered.length<2) return null;
+  const ratios = filtered.map(p=>p.actual/p.expected);
+  const mean = ratios.reduce((a,b)=>a+b,0)/ratios.length;
+  const variance = ratios.reduce((a,b)=>a+(b-mean)**2,0)/ratios.length;
+  const sd = Math.sqrt(variance);
+  return { meanRatio: mean, sd, consistent: sd < 0.15*Math.abs(mean||1) };
+}
+function legBalance(l1, l2) { return pearson(l1, l2); }
+
+
+// ---------- Orchestrator ----------
+function runDiagnostic(parsed) {
+  const { mode, points } = parsed;
+  const items = [];
+
+  const negPV = checkNegativePV(points);
+  if (negPV.length > 0) {
+    const whileExporting = negPV.some(r => r.diagnosis === 'offset_zero_cal');
+    items.push({
+      type: 'issue',
+      headline: `PV reads negative at ${negPV.length} point(s)` + (mode==='load_with_solar' ? (whileExporting ? ' while exporting' : ' while importing') : ''),
+      resolution: whileExporting ? 'check Production CT offset/zero-cal' : 'check Production CT polarity/offset',
+      seeing: `Lowest reading: ${Math.min(...negPV.map(r=>r.pv)).toFixed(0)}W, across ${negPV.length} of ${points.length} points.`,
+      recommendation: whileExporting
+        ? 'Site exports at the same time PV reads negative — physically inconsistent. Check Production CT offset/zero-cal.'
+        : 'Check whether PV also reads negative at peak output (full polarity flip) vs. only near zero (offset/zero-cal).'
+    });
+  } else {
+    items.push({ type:'confirmed', headline:'No negative-PV artifact detected', resolution:'no action needed',
+      seeing:'PV stays at or above the noise floor throughout.', recommendation:'None.' });
+  }
+
+  if (mode === 'load_with_solar') {
+    const balance = checkBalance(points);
+    const flagged = balance.filter(b=>b.flagged);
+    if (flagged.length > 0) {
+      const sign = signConsistency(balance.map(b=>b.deviation));
+      const ratio = ratioConsistency(balance.map(b=>({expected:b.expected, actual:b.actual})));
+      let rec = 'Check Production CT multiplier/scale and Grid CT config remotely; site visit if unresolved.';
+      if (ratio && ratio.consistent) rec = `Deviation ratio is consistent (≈${ratio.meanRatio.toFixed(2)}) — check the CT ratio/multiplier entered at commissioning.`;
+      else if (sign.consistent) rec = 'Deviation is one-directional but variable in size — more consistent with an untracked second source or CT non-linearity than a fixed multiplier.';
+      items.push({ type:'issue',
+        headline: `Grid doesn't reconcile with Load−PV at ${flagged.length}/${balance.length} point(s)`,
+        resolution: 'check Production CT config; escalate if unresolved',
+        seeing: `Largest deviation ${Math.max(...flagged.map(b=>Math.abs(b.deviation))).toFixed(0)}W.`,
+        recommendation: rec });
+    } else {
+      items.push({ type:'confirmed', headline:'Grid reconciles with Load−PV within tolerance', resolution:'no action needed',
+        seeing:`All ${balance.length} points balance within tolerance (mean |dev| ${ (balance.reduce((s,b)=>s+Math.abs(b.deviation),0)/balance.length).toFixed(1) }W).`,
+        recommendation:'None.' });
+    }
+  } else {
+    items.push({ type:'info', headline:'No Grid trace in this export', resolution:'balance check unavailable',
+      seeing:'This export has Produced/Consumed by leg only — no separate Grid column.', recommendation:'Not a fault — just a scope limit of this export. Leg-balance and cross-talk checks below still apply.' });
+  }
+
+  if (mode === 'legs_only') {
+    const l1p = points.map(p=>p.p1), l2p = points.map(p=>p.p2);
+    const l1c = points.map(p=>p.c1), l2c = points.map(p=>p.c2);
+    const rProd = legBalance(l1p, l2p);
+    const rCons = legBalance(l1c, l2c);
+    items.push({ type: (rProd!==null && rProd>0.9) ? 'confirmed':'issue',
+      headline:`Produced L1/L2 leg correlation: ${rProd!==null?rProd.toFixed(2):'—'}`,
+      resolution: (rProd!==null && rProd>0.9) ? 'no action needed' : 'check leg balance / CT placement',
+      seeing:'Both production legs should track closely for a balanced split-phase system.',
+      recommendation: (rProd!==null && rProd>0.9) ? 'None.' : 'Legs are not tracking — check CT placement on each leg.' });
+  }
+
+  const pv = points.map(p=>p.pv), load = points.map(p=>p.load).filter(v=>v!==null);
+  if (load.length === points.length && points.length >= 6) {
+    const rawR = pearson(pv, load);
+    const diffR = differencedCorrelation(pv, load);
+    if (diffR !== null) {
+      const concerning = Math.abs(diffR) > 0.6;
+      items.push({ type: concerning?'issue':'confirmed',
+        headline:`Production/Load step-change correlation: ${diffR.toFixed(2)} (raw: ${rawR!==null?rawR.toFixed(2):'—'})`,
+        resolution: concerning?'investigate possible CT cross-talk':'no cross-talk indicated',
+        seeing:'Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope.',
+        recommendation: concerning ? 'High enough to check whether the Load CT is physically picking up Production current.' : 'Within the range consistent with independent, healthy measurement.' });
+    }
+  }
+
+  const issues = items.filter(i=>i.type==='issue');
+  return {
+    status: issues.length>0 ? 'TROUBLESHOOT' : 'GOOD',
+    summary: issues.length>0 ? `${issues.length} issue(s) flagged, ${items.length-issues.length} other item(s)` : 'No issues flagged',
+    items
+  };
+}
+
+</script>
+<script>
+const fileInput = document.getElementById('file-input');
+const uploadCard = document.getElementById('upload-card');
+const errorBox = document.getElementById('error');
+const resultsEl = document.getElementById('results');
+
+fileInput.addEventListener('change', (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+uploadCard.addEventListener('dragover', (e) => { e.preventDefault(); uploadCard.classList.add('dragover'); });
+uploadCard.addEventListener('dragleave', () => uploadCard.classList.remove('dragover'));
+uploadCard.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uploadCard.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+
+function handleFile(file) {
+  document.getElementById('filename').textContent = file.name;
+  errorBox.style.display = 'none';
+  resultsEl.style.display = 'none';
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const parsed = rowsFromCSV(ev.target.result);
+      if (parsed.error) { showError(parsed.error); return; }
+      if (!parsed.points || parsed.points.length === 0) { showError('No usable data rows found after parsing.'); return; }
+      const report = runDiagnostic(parsed);
+      renderReport(report, parsed, file.name);
+    } catch (err) {
+      showError('Could not parse this file: ' + err.message);
+    }
+  };
+  reader.onerror = () => showError('Could not read the file.');
+  reader.readAsText(file);
+}
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.style.display = 'block';
+}
+
+function renderReport(report, parsed, filename) {
+  document.getElementById('meta-filename').textContent = filename;
+  document.getElementById('meta-mode').textContent = parsed.mode === 'load_with_solar' ? 'PV / Grid / Load' : 'Produced / Consumed by leg (no Grid trace)';
+  document.getElementById('meta-points').textContent = parsed.points.length;
+
+  const banner = document.getElementById('status-banner');
+  banner.className = 'status-banner ' + (report.status === 'GOOD' ? 'ok' : 'flag');
+  document.getElementById('status-icon').textContent = report.status === 'GOOD' ? '🟢' : '🔴';
+  document.getElementById('status-headline').textContent = report.status === 'GOOD' ? 'GOOD' : 'TROUBLESHOOT';
+  document.getElementById('status-summary').textContent = report.summary;
+
+  const bulletFor = { issue: '✗', confirmed: '✓', info: 'ⓘ' };
+  const tagFor = { issue: 'Issue', confirmed: 'Confirmed normal', info: 'Info' };
+
+  document.getElementById('quick-lines').innerHTML = report.items.map((it, i) => `
+    <a class="quick-line" href="#item-${i}">
+      <span class="bullet ${it.type}">${bulletFor[it.type]}</span>
+      <span class="line-text"><b>${it.headline}</b> → ${it.resolution}</span>
+      <span class="jump">Details ↓</span>
+    </a>`).join('');
+
+  document.getElementById('detail-cards').innerHTML = report.items.map((it, i) => `
+    <div class="detail-card ${it.type}" id="item-${i}">
+      <h3><span class="tag">${tagFor[it.type]}</span> ${it.headline}</h3>
+      <div class="label">What I'm seeing</div>
+      <p>${it.seeing}</p>
+      <div class="label">Recommendation</div>
+      <p>${it.recommendation}</p>
+    </div>`).join('');
+
+  resultsEl.style.display = 'block';
+}
+
+function resetTool() {
+  fileInput.value = '';
+  document.getElementById('filename').textContent = '';
+  errorBox.style.display = 'none';
+  resultsEl.style.display = 'none';
+}
+</script>
+</body>
+</html>
