@@ -339,7 +339,7 @@
   </div>
 
   <footer>
-    <p class="footer-checks">Checks: negative-PV diagnosis · Grid=Load−PV balance (when available) · leg-balance · Production/Load step-change correlation (cross-talk)</p>
+    <p class="footer-checks">Checks: negative-PV diagnosis · Grid=Load−PV balance (when available) · leg-balance · Production/Load step-change correlation (cross-talk) · flatline/dropout detection · per-day production anomaly</p>
     <p class="footer-disclaimer"><strong>Disclaimer:</strong> Content on this site includes cited references from NEC or official sources, and personal opinion from 13 years of solar industry experience. Human error is possible. Nothing here constitutes legal, engineering, or compliance advice. Always verify with your local AHJ.</p>
   </footer>
 </div>
@@ -497,6 +497,68 @@ function ratioConsistency(pairs, minExpectedAbs=200) {
 }
 function legBalance(l1, l2) { return pearson(l1, l2); }
 
+// ---------- Flatline / dropout detection ----------
+// A real channel almost never holds bit-for-bit (or near-identical) constant
+// for hours — that's the signature of a dead CT, comms dropout, or an
+// offline inverter, distinct from genuinely low values that still wiggle.
+
+function parseTimeSafe(str) {
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** Finds the longest run of near-constant values (within toleranceW) and
+ * returns its duration in hours if timestamps parse, else null duration
+ * (caller should fall back to a point-count heuristic in that case). */
+function longestFlatRun(points, key, toleranceW) {
+  let best = { startIdx: 0, endIdx: 0, count: 1, value: points[0]?.[key] ?? null };
+  let curStart = 0;
+  for (let i = 1; i <= points.length; i++) {
+    const prev = points[i-1]?.[key];
+    const cur = i < points.length ? points[i][key] : null;
+    const sameRun = i < points.length && prev !== null && cur !== null && Math.abs(cur - prev) <= toleranceW;
+    if (!sameRun) {
+      const count = i - curStart;
+      if (count > best.count) best = { startIdx: curStart, endIdx: i-1, count, value: points[curStart][key] };
+      curStart = i;
+    }
+  }
+  const startT = parseTimeSafe(points[best.startIdx]?.time);
+  const endT = parseTimeSafe(points[best.endIdx]?.time);
+  const durationHours = (startT && endT) ? (endT - startT) / 3600000 : null;
+  return { ...best, durationHours };
+}
+
+function checkFlatline(points, key, { toleranceW = 5, minHours = 3, minPoints = 12, minMagnitudeW = 0 } = {}) {
+  const valid = points.filter(p => p[key] !== null && p[key] !== undefined);
+  if (valid.length < minPoints) return null;
+  const run = longestFlatRun(valid, key, toleranceW);
+  const longEnough = run.durationHours !== null ? run.durationHours >= minHours : run.count >= minPoints;
+  const magnitudeOk = Math.abs(run.value) >= minMagnitudeW;
+  return { ...run, flagged: longEnough && magnitudeOk };
+}
+
+/** Groups points by calendar day (best-effort from the time string) and
+ * flags any day whose peak is far below the dataset's typical peak — catches
+ * a single offline day hiding inside an otherwise-healthy multi-day export. */
+function checkPerDayProductionAnomaly(points, key, minTypicalPeak = 500, ratioThreshold = 0.15) {
+  const byDay = {};
+  for (const p of points) {
+    const t = parseTimeSafe(p.time);
+    const dayKey = t ? t.toISOString().slice(0,10) : (p.time || '').slice(0,10);
+    if (!dayKey) continue;
+    (byDay[dayKey] ||= []).push(p[key]);
+  }
+  const days = Object.keys(byDay);
+  if (days.length < 3) return null; // need a few days to establish "typical"
+  const peaks = days.map(d => ({ day: d, peak: Math.max(...byDay[d].filter(v=>v!==null && v!==undefined)) }));
+  const sorted = [...peaks].sort((a,b)=>a.peak-b.peak);
+  const median = sorted[Math.floor(sorted.length/2)].peak;
+  if (median < minTypicalPeak) return null; // dataset itself is low-output overall, not a fair comparison
+  const anomalousDays = peaks.filter(p => p.peak < median * ratioThreshold);
+  return { median, anomalousDays, totalDays: days.length };
+}
+
 
 // ---------- Orchestrator ----------
 function runDiagnostic(parsed) {
@@ -572,6 +634,50 @@ function runDiagnostic(parsed) {
         seeing:'Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope.',
         recommendation: concerning ? 'High enough to check whether the Load CT is physically picking up Production current.' : 'Within the range consistent with independent, healthy measurement.' });
     }
+  }
+
+  // ---------- Flatline / dropout scan (PV/Produced, Grid/Site, Load/Consumed, Battery) ----------
+  const flatChecks = [
+    { key: 'pv', label: mode === 'tesla_derived' ? 'Solar' : 'PV/Production', opts: { minHours: 16, toleranceW: 5 } },
+    { key: 'grid', label: mode === 'tesla_derived' ? 'Site' : 'Grid', opts: { minHours: 4, toleranceW: 5, minMagnitudeW: 50 } },
+    { key: 'load', label: mode === 'tesla_derived' ? 'Load (derived)' : 'Load/Consumption', opts: { minHours: 3, toleranceW: 5 } },
+  ];
+  if (mode === 'tesla_derived') flatChecks.push({ key: 'batt', label: 'Battery', opts: { minHours: 4, toleranceW: 5, minMagnitudeW: 50 } });
+
+  const flatResults = flatChecks
+    .map(fc => ({ ...fc, result: checkFlatline(points, fc.key, fc.opts) }))
+    .filter(fc => fc.result !== null);
+  const flaggedFlats = flatResults.filter(fc => fc.result.flagged);
+
+  if (flatResults.length > 0) {
+    if (flaggedFlats.length > 0) {
+      items.push({
+        type: 'issue',
+        headline: flaggedFlats.map(fc => `${fc.label} flat at ~${fc.result.value.toFixed(0)}W for ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+'h' : fc.result.count+' pts'}`).join('; '),
+        resolution: 'check for comms dropout, disconnected CT, or offline inverter/gateway',
+        seeing: flaggedFlats.map(fc => `${fc.label} held within ${fc.opts.toleranceW}W of ${fc.result.value.toFixed(0)}W for the longest stretch in the data — ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+' hours straight' : fc.result.count+' consecutive samples'}. Real channels essentially never hold this still for this long.`).join(' '),
+        recommendation: 'Check whether this lines up with a known outage/comms gap. If not, verify the CT is still connected and the gateway is reporting — a long, suspiciously flat stretch is the signature of a dropped channel, not just low real-world activity.',
+      });
+    } else {
+      items.push({
+        type: 'confirmed',
+        headline: 'No flatlined/dropped channels detected',
+        resolution: 'no action needed',
+        seeing: `Checked ${flatResults.map(fc=>fc.label).join(', ')} for abnormally long constant-value stretches.`,
+        recommendation: 'None — all channels show normal variation.',
+      });
+    }
+  }
+
+  const dayAnomaly = checkPerDayProductionAnomaly(points, 'pv');
+  if (dayAnomaly && dayAnomaly.anomalousDays.length > 0) {
+    items.push({
+      type: 'issue',
+      headline: `${dayAnomaly.anomalousDays.length} day(s) with production far below the dataset's typical peak`,
+      resolution: 'check inverter/gateway logs for those dates',
+      seeing: `Typical daily peak across ${dayAnomaly.totalDays} days is ~${dayAnomaly.median.toFixed(0)}W. ${dayAnomaly.anomalousDays.map(d=>`${d.day} peaked at only ${d.peak.toFixed(0)}W`).join('; ')}.`,
+      recommendation: 'Could be weather (verify against local conditions for that date) or a real outage. Worth a quick remote check of system status/uptime logs for the flagged date(s) before assuming weather.',
+    });
   }
 
   const issues = items.filter(i=>i.type==='issue');
