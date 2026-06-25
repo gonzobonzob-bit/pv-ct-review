@@ -161,6 +161,15 @@ function detectSchema(headerRow) {
     return { kind: 'load_with_solar', pvIdx, gridIdx, loadIdx };
   }
 
+  // Tesla-style export: solar_instant_power / site_instant_power / battery_instant_power / load_instant_real_power
+  const solarIdx = norm.findIndex(h => /solar.*power/.test(h));
+  const siteIdx = norm.findIndex(h => /site.*power/.test(h));
+  const battIdx = norm.findIndex(h => /battery.*power/.test(h));
+  const loadPowerIdx = norm.findIndex(h => /load.*power/.test(h));
+  if (solarIdx !== -1 && siteIdx !== -1) {
+    return { kind: 'tesla_derived', pvIdx: solarIdx, gridIdx: siteIdx, battIdx, loadIdx: loadPowerIdx };
+  }
+
   // Look for two L1/L2-style pairs (Produced legs, Consumed legs) by position
   const legIdxs = [];
   norm.forEach((h, i) => { if (/^l1\s*\(a\)/.test(h) || /^l2\s*\(b\)/.test(h)) legIdxs.push(i); });
@@ -182,7 +191,9 @@ function rowsFromCSV(text) {
   const schema = detectSchema(header);
   if (schema.kind === 'unknown') return { error: schema.reason };
 
-  const timeIdxFound = header.findIndex(h => /date|time/i.test(h));
+  const timeIdxFound = header.findIndex(h => /^datetime$/i.test(h.trim())) !== -1
+    ? header.findIndex(h => /^datetime$/i.test(h.trim()))
+    : header.findIndex(h => /date|time/i.test(h));
   const timeIdx = timeIdxFound !== -1 ? timeIdxFound : 0; // fall back to first column — common in real exports with a blank header
   const dataRows = table.slice(1);
 
@@ -196,6 +207,17 @@ function rowsFromCSV(text) {
       load: num(r[schema.loadIdx]),
     })).filter(p => p.pv !== null && p.grid !== null && p.load !== null);
     return { mode: 'load_with_solar', points };
+  }
+
+  if (schema.kind === 'tesla_derived') {
+    const points = dataRows.map(r => ({
+      time: timeIdx !== -1 ? r[timeIdx] : '',
+      pv: num(r[schema.pvIdx]),
+      grid: num(r[schema.gridIdx]),
+      batt: schema.battIdx !== -1 ? num(r[schema.battIdx]) : 0,
+      load: schema.loadIdx !== -1 ? num(r[schema.loadIdx]) : null, // derived, not independently measured
+    })).filter(p => p.pv !== null && p.grid !== null);
+    return { mode: 'tesla_derived', points };
   }
 
   if (schema.kind === 'legs_only') {
@@ -266,7 +288,7 @@ function runDiagnostic(parsed) {
     const whileExporting = negPV.some(r => r.diagnosis === 'offset_zero_cal');
     items.push({
       type: 'issue',
-      headline: `PV reads negative at ${negPV.length} point(s)` + (mode==='load_with_solar' ? (whileExporting ? ' while exporting' : ' while importing') : ''),
+      headline: `PV reads negative at ${negPV.length} point(s)` + ((mode==='load_with_solar'||mode==='tesla_derived') ? (whileExporting ? ' while exporting' : ' while importing') : ''),
       resolution: whileExporting ? 'check Production CT offset/zero-cal' : 'check Production CT polarity/offset',
       seeing: `Lowest reading: ${Math.min(...negPV.map(r=>r.pv)).toFixed(0)}W, across ${negPV.length} of ${points.length} points.`,
       recommendation: whileExporting
@@ -297,6 +319,10 @@ function runDiagnostic(parsed) {
         seeing:`All ${balance.length} points balance within tolerance (mean |dev| ${ (balance.reduce((s,b)=>s+Math.abs(b.deviation),0)/balance.length).toFixed(1) }W).`,
         recommendation:'None.' });
     }
+  } else if (mode === 'tesla_derived') {
+    items.push({ type:'info', headline:'Load is derived, not independently measured', resolution:'no separate Load CT to check',
+      seeing:'On this export, Load = Solar + Site (+ Battery) exactly — confirmed by checking the numbers directly. Tesla systems typically have no separate Load CT; Load is calculated from the other three.',
+      recommendation:'There is nothing wrong with this — it is how the architecture works. It means a "Load looks off" complaint on a Tesla system should point you at Solar or Site/Battery CTs, not a Load CT that likely doesn\'t exist.' });
   } else {
     items.push({ type:'info', headline:'No Grid trace in this export', resolution:'balance check unavailable',
       seeing:'This export has Produced/Consumed by leg only — no separate Grid column.', recommendation:'Not a fault — just a scope limit of this export. Leg-balance and cross-talk checks below still apply.' });
@@ -315,7 +341,7 @@ function runDiagnostic(parsed) {
   }
 
   const pv = points.map(p=>p.pv), load = points.map(p=>p.load).filter(v=>v!==null);
-  if (load.length === points.length && points.length >= 6) {
+  if (mode !== 'tesla_derived' && load.length === points.length && points.length >= 6) {
     const rawR = pearson(pv, load);
     const diffR = differencedCorrelation(pv, load);
     if (diffR !== null) {
