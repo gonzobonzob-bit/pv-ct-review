@@ -88,9 +88,9 @@
   .detail-card.info h3 .tag{background:var(--amber-bg); color:var(--amber);}
   .detail-card .label{font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:700; margin-top:10px;}
   .detail-card p{margin:4px 0 0; font-size:13px; color:var(--ink);}
-  .customer-note{margin-top:14px; padding:12px 14px; background:var(--card-alt); border:1px dashed var(--line); border-radius:8px;}
-  .customer-note-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--orange);}
-  .customer-note p{margin-top:6px; font-style:italic;}
+  .plain-summary{margin-top:14px; padding:12px 14px; background:var(--card-alt); border:1px dashed var(--line); border-radius:8px;}
+  .plain-summary-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--orange);}
+  .plain-summary p{margin-top:6px; font-style:italic;}
 
   .meta-row{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:10px; flex-wrap:wrap; gap:6px;}
   .meta-row b{color:var(--ink); font-family:var(--mono);}
@@ -509,17 +509,17 @@ function runDiagnostic(parsed) {
     const whileExporting = negPV.some(r => r.diagnosis === 'offset_zero_cal');
     const isTesla = mode === 'tesla_derived';
 
-    let recommendation, customerNote;
+    let recommendation, plainSummary;
     if (isTesla) {
       recommendation = whileExporting
         ? '<strong>Remote check:</strong> open the Meter page in Tesla One\'s Device Setup and look at the Solar CT — if it shows the "Flip" indicator already set, the polarity itself may be fine and this is a smaller offset; confirm the CT is on the correct phase before assuming a fix is needed. <strong>If it escalates:</strong> if this persists into clear daylight hours (not just a brief low-light dip), dispatch to verify the CT is clamped on the correct conductor — note Tesla\'s system requires Solar > 0 and Site < 0 to charge from solar, so this can quietly block solar charging even while production itself is fine.'
         : '<strong>Remote check:</strong> in Tesla One\'s Device Setup → Meter page, check the "Flip" box on the Solar CT — Tesla\'s own UI states a negative reading "may indicate the CT is installed backwards or on the wrong phase." Toggling it is a fully remote fix if the CT is on the right phase, just oriented backward. <strong>If it escalates:</strong> if flipping doesn\'t produce a clean, sensible reading (or makes it worse), the CT is likely on the wrong phase rather than just backward — that needs a truck roll to re-clamp on the correct conductor, not another software flip. Some installers prefer the physical fix outright since a firmware update can occasionally reset the electronic flip.';
-      customerNote = 'This is a monitoring/sensor reading issue, not a sign your panels aren\'t producing power. It can also affect whether your battery charges from solar as expected, so it\'s worth scheduling a technician visit to correct the sensor.';
+      plainSummary = 'In plain terms: this is a monitoring sensor reading issue, not an indication that the panels have stopped producing power. It can also block the battery from charging from solar as expected, since the system requires a positive Solar reading to do that.';
     } else {
       recommendation = whileExporting
         ? '<strong>Remote check:</strong> run the CT Health Check (Installer Portal → Devices → Production Meter → CT Summary → Verify CT) — it automatically checks polarity and tells you whether to use the Reverse Polarity button, fully remotely. If it flags polarity, flip it and allow 48 hours before re-checking — the fix won\'t show immediately, so don\'t re-flip same-day if it still looks off. <strong>If it escalates:</strong> if the health check instead flags missing branches or a phase mismatch, that\'s wiring, not polarity — dispatch with instructions to verify L1/L2/L3 phasing between the PV circuits and the gateway terminals.'
         : '<strong>Remote check:</strong> same tool — Installer Portal → Devices → Production Meter → CT Summary → Verify CT. This is Enphase\'s own automated polarity check; if it confirms a reversed CT, use the Reverse Polarity button right there (no truck roll) and allow 48 hours for new data before reusing the feature or re-checking. <strong>If it escalates:</strong> if the health check flags missing branches instead of pure polarity, or the reading doesn\'t correct after the 48-hour window, the CT is likely on the wrong phase — that\'s a physical re-clamp, not another software flip.';
-      customerNote = 'This points to a monitoring sensor reading backward, not your solar panels failing to produce power. Your system is very likely still making and using solar energy normally — this just needs a technician to correct what the monitoring display shows, and in many cases that can be done remotely without a site visit.';
+      plainSummary = 'In plain terms: a monitoring sensor is reading backward, not the panels failing to produce power. The system is very likely still making and using solar energy normally — this is a display/measurement correction, and in many cases that correction can be made remotely.';
     }
 
     items.push({
@@ -528,7 +528,7 @@ function runDiagnostic(parsed) {
       resolution: whileExporting ? (isTesla ? 'check Solar CT placement/phase' : 'check Production CT arrow direction and phase match') : (isTesla ? 'check Solar CT phase/Flip setting' : 'check Production CT polarity/phase'),
       seeing: `Lowest reading: ${Math.min(...negPV.map(r=>r.pv)).toFixed(0)}W, across ${negPV.length} of ${points.length} points.`,
       recommendation,
-      customerNote,
+      plainSummary,
     });
   } else {
     items.push({ type:'confirmed', headline:'No negative-PV artifact detected', resolution:'no action needed',
@@ -549,7 +549,7 @@ function runDiagnostic(parsed) {
         resolution: 'try remote CT health check first; escalate only if it comes back clean',
         seeing: `Largest deviation ${Math.max(...flagged.map(b=>Math.abs(b.deviation))).toFixed(0)}W.`,
         recommendation: rec,
-        customerNote: 'Your system\'s monitoring numbers don\'t quite add up the way they should — this is almost always a meter/sensor calibration issue, not a sign your solar isn\'t working. Many cases like this can be corrected remotely; if not, a brief technician visit will sort it out.' });
+        plainSummary: 'In plain terms: the production and consumption numbers don\'t add up the way they should — this is almost always a meter/sensor calibration issue, not a sign the solar system isn\'t working. Often correctable remotely; a brief site visit resolves the rest.' });
     } else {
       items.push({ type:'confirmed', headline:'Grid reconciles with Load−PV within tolerance', resolution:'no action needed',
         seeing:`All ${balance.length} points balance within tolerance (mean |dev| ${ (balance.reduce((s,b)=>s+Math.abs(b.deviation),0)/balance.length).toFixed(1) }W).`,
@@ -635,7 +635,7 @@ function runDiagnostic(parsed) {
         resolution: 'confirm it\'s live, then dispatch if so',
         seeing: 'Consumption legs are independent circuits and aren\'t expected to track each other — but each one should still show normal variation on its own. A long flat stretch on just one leg can hide inside a healthy-looking combined Load total if the other leg keeps moving.',
         recommendation: '<strong>Remote check:</strong> pull up the live per-leg consumption view in Enlighten/Installer Portal right now — if the flagged leg is moving again, this was a temporary data gap or a one-off communication blip, not an active fault; note it and move on. <strong>If it escalates:</strong> if the leg is still flat live, this needs a truck roll — per Enphase\'s meter-error guidance, the fix is almost always one of: the CT not fully latched/clamped (resting closed isn\'t enough), the blue/white lead wires crossed with the other leg\'s pair, or a disconnected neutral at the panel. None of those are remotely fixable, so don\'t spend more remote time on this one once it\'s confirmed live.',
-        customerNote: 'This is about one of your home\'s monitoring sensors, not your solar system\'s ability to produce or use power. It usually needs a quick technician visit to fix a loose connection at the panel.' });
+        plainSummary: 'In plain terms: this is one consumption monitoring sensor, not the system\'s ability to produce or use power. Usually a quick fix for a loose connection at the panel.' });
     } else {
       items.push({ type:'confirmed', headline:'No per-leg consumption dropout detected', resolution:'no action needed',
         seeing:'Checked each consumption leg independently (not just the combined total) for abnormally long constant-value stretches.',
@@ -656,7 +656,7 @@ function runDiagnostic(parsed) {
         recommendation: concerning
           ? '<strong>Remote check:</strong> run the CT Health Check on the Consumption meter — if it flags a polarity or branch issue, that\'s a faster, fully remote explanation worth ruling out first. Also worth pulling a second, different day (ideally one with choppy/cloud-broken production) — if Load tracks PV\'s wiggles tightly on that day too, that strengthens the case for real cross-talk rather than coincidence. <strong>If it escalates:</strong> if the health check is clean and the pattern holds on a second day, this needs a truck roll — genuine CT cross-talk means the Consumption CT is physically picking up the Production conductor\'s field, which is fixed by relocating/separating the CTs, not a software setting.'
           : 'Within the range consistent with independent, healthy measurement.',
-        customerNote: concerning ? 'Your home\'s usage and your solar production are showing up a little too similarly in the monitoring data, which usually means two sensors are installed too close together rather than anything wrong with your system\'s actual performance. A technician visit will typically resolve it by repositioning a sensor.' : undefined });
+        plainSummary: concerning ? 'In plain terms: usage and production are showing up a little too similarly in the data, which usually means two sensors are positioned too close together rather than anything wrong with actual system performance. Typically resolved by repositioning a sensor.' : undefined });
     }
   }
 
@@ -671,9 +671,9 @@ function runDiagnostic(parsed) {
         recommendation: wholeSystemOffline
           ? '<strong>Remote check:</strong> look at the gateway\'s current connectivity/last-seen status in Enlighten or Tesla One — if it\'s online and reporting right now, this was a temporary power or internet blip that\'s already resolved; note the date range and move on, no dispatch needed. If it\'s still offline live, ask the homeowner to power-cycle the gateway and their router/modem first — that resolves most comms gaps without a truck roll. <strong>If it escalates:</strong> only dispatch if it\'s still offline after a remote power-cycle attempt — at that point it\'s likely a hardware or wiring issue at the gateway itself, not a connectivity blip.'
           : '<strong>Remote check:</strong> pull up this channel\'s live reading right now — if it\'s moving again, this was a one-off data gap, not an active fault; note it and move on, no dispatch needed. <strong>If it escalates:</strong> if it\'s still flat live, verify the CT is still connected and latched, and that the gateway/inverter is actively reporting — a long, suspiciously flat stretch is the signature of a dropped channel, not just low real-world activity, and that\'s a truck-roll item.',
-        customerNote: wholeSystemOffline
-          ? 'Your system\'s monitoring lost connection for a stretch of time — this is usually a power or internet interruption at your home, not a problem with your solar equipment itself. If it\'s already back online, no action is needed; if not, try unplugging and replugging in your monitoring gateway and home router.'
-          : 'This is about your monitoring connection, not your equipment\'s ability to produce or use power. We\'ll confirm remotely whether it has already corrected itself before considering a visit.',
+        plainSummary: wholeSystemOffline
+          ? 'In plain terms: monitoring lost connection for a stretch of time — usually a power or internet interruption at the site, not a problem with the solar equipment itself. If already back online, no action needed.'
+          : 'In plain terms: this is a monitoring connection gap, not the equipment\'s ability to produce or use power. Confirm remotely whether it has already self-corrected before considering a visit.',
       });
     } else {
       items.push({
@@ -715,7 +715,7 @@ function runDiagnostic(parsed) {
           resolution: 'check event log first; dispatch only if no fault is logged',
           seeing: `Typical daily peak across ${dayAnomaly.totalDays} days is ~${dayAnomaly.median.toFixed(0)}W. This run dropped to ${Math.min(...run.map(d=>d.peak)).toFixed(0)}–${Math.max(...run.map(d=>d.peak)).toFixed(0)}W for ${run.length} straight days — multiple consecutive days is a much stronger fault signal than a single low day, since weather rarely depresses output this much for this long while neighboring days nearby in the same dataset stay normal.`,
           recommendation: '<strong>Remote check:</strong> pull the gateway/microinverter event log in the Installer App for this exact date range — a logged fault code (e.g. grid profile trip, comms loss, ground fault) tells you the cause without a visit, and some fault types clear themselves once the underlying issue passes. <strong>If it escalates:</strong> if there\'s no fault code despite the drop, dispatch — that combination (real production loss, no system fault logged) points to something physical the system can\'t detect on its own: snow or debris coverage, a tripped breaker, or a downed branch shading the array. Confirm with the homeowner whether anything changed around the start date before the visit.',
-          customerNote: `Your system produced noticeably less power than usual for ${run.length} days in a row (${run[0].day} to ${run[run.length-1].day}). This is more than typical weather variation, so we're looking into the cause — it could be anything from a temporary fault that's already cleared to something like snow or debris on the panels. We'll follow up with what we find.`,
+          plainSummary: `In plain terms: production was noticeably below normal for ${run.length} days in a row (${run[0].day} to ${run[run.length-1].day}) — more than typical weather variation. Cause is still being confirmed; could range from a temporary fault that's already cleared to a physical obstruction like snow or debris.`,
         });
       });
     }
@@ -810,7 +810,7 @@ function renderReport(report, parsed, filename) {
       <p>${it.seeing}</p>
       <div class="label">Recommendation</div>
       <p>${it.recommendation}</p>
-      ${it.customerNote ? `<div class="customer-note"><div class="customer-note-label">💬 Customer-facing summary</div><p>${it.customerNote}</p></div>` : ''}
+      ${it.plainSummary ? `<div class="plain-summary"><div class="plain-summary-label">📋 Plain-language summary</div><p>${it.plainSummary}</p></div>` : ''}
     </div>`).join('');
 
   resultsEl.style.display = 'block';
