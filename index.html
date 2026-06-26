@@ -126,6 +126,8 @@
   .two-col{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
   @media (max-width:540px){ .two-col{grid-template-columns:1fr;} }
   .upload-card h4{margin:0 0 10px; font-size:12.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px;}
+  .micro-dropzone{padding:12px; border:1px dashed transparent; border-radius:8px; transition:border-color .15s, background .15s;}
+  .micro-dropzone.dragover{border-color:var(--orange); background:var(--card-alt);}
 </style>
 </head>
 <body>
@@ -183,17 +185,19 @@
     <div class="micro-body">
       <div class="upload-card" style="text-align:left;">
         <div class="two-col">
-          <div>
+          <div class="micro-dropzone" id="micro-dropzone-a">
             <h4>Inverter A (suspect / lower producer)</h4>
             <label class="upload-label" for="micro-file-a">Choose CSV</label>
             <input type="file" id="micro-file-a" accept=".csv">
             <div class="filename" id="micro-filename-a"></div>
+            <div class="upload-hint" style="margin-top:6px;">or drag and drop here</div>
           </div>
-          <div>
+          <div class="micro-dropzone" id="micro-dropzone-b">
             <h4>Inverter B (reference / comparison)</h4>
             <label class="upload-label" for="micro-file-b">Choose CSV</label>
             <input type="file" id="micro-file-b" accept=".csv">
             <div class="filename" id="micro-filename-b"></div>
+            <div class="upload-hint" style="margin-top:6px;">or drag and drop here</div>
           </div>
         </div>
         <div class="btnbar" style="margin-top:18px;">
@@ -492,6 +496,44 @@ function classifyTimelinePosition(result) {
     note: 'Normal activity resumed after this gap and continued through to the most recent data — this already appears resolved, though identifying the root cause is still worthwhile to prevent a repeat.' };
 }
 
+/** Distinguishes a sudden, abrupt production cutoff (the signature of a
+ * remote shutoff, a tripped/opened breaker, or a system fault) from a
+ * normal gradual sunset decline. A real decline tapers over roughly an
+ * hour and happens near the site's own typical end-of-production time; a
+ * sudden cutoff drops from substantial output to near-zero within one or
+ * two samples, well before that time. Only meaningful when there is a real
+ * data point immediately before the gap to compare against — not
+ * computable for a gap that starts at the very first row of the export. */
+function classifyDropShape(points, key, runStartTime, sunWindow, substantialW = 500) {
+  if (!runStartTime) return null;
+  const before = points
+    .filter(p => p[key] !== null && p[key] !== undefined)
+    .map(p => ({ ...p, _t: parseTimeSafe(p.time) }))
+    .filter(p => p._t && p._t < runStartTime)
+    .sort((a, b) => b._t - a._t)[0];
+  if (!before) return null; // nothing before the gap — can't judge the transition shape
+
+  const preDropValue = before[key];
+  const wasProducingMeaningfully = preDropValue >= substantialW;
+  if (!wasProducingMeaningfully) return null; // tapered down from a small value already — not a cutoff
+
+  // Measure the transition by actual speed, not time-of-day vs. a calibrated
+  // "typical sunset" — that calibration can be contaminated when the file
+  // only contains the faulty day itself (the only data sunWindow has to
+  // learn from IS the fault), which would make the fault look like a
+  // normal sunset by definition. A real sunset, even at its steepest, takes
+  // a real physical span of time to fall from substantial output to near-
+  // zero; an abrupt cutoff does it within one or two sample intervals.
+  const elapsedMinutes = (runStartTime - before._t) / 60000;
+  if (elapsedMinutes > 60) {
+    // The gap between these two samples is itself large enough that a
+    // genuinely gradual decline could be hiding inside it — not enough
+    // resolution here to confidently call this abrupt.
+    return { abrupt: false, preDropValue, elapsedMinutes, note: 'gap too sparse to judge transition speed' };
+  }
+  return { abrupt: true, preDropValue, elapsedMinutes };
+}
+
 /** Derives this site's own typical production window from the data itself
  * (earliest and latest time-of-day with real output observed anywhere in
  * the dataset), rather than assuming a fixed day/night split. A generic
@@ -762,8 +804,19 @@ function runDiagnostic(parsed) {
   }
 
   // ---------- Flatline / dropout scan results (computed earlier) ----------
+  // A sudden mid-day cutoff is worth flagging on its abruptness alone —
+  // it shouldn't have to wait until enough hours accumulate to also clear
+  // the duration-based threshold above. Computed against the 'pv' entry
+  // regardless of whether the duration check itself flagged it.
+  const pvFlatResult = flatResults.find(fc => fc.key === 'pv');
+  const pvDropShape = (pvFlatResult && !wholeSystemOffline)
+    ? classifyDropShape(points, 'pv', pvFlatResult.result.startTime, pvSunWindow)
+    : null;
+  const suddenCutoffDetected = !!(pvDropShape && pvDropShape.abrupt) && !flaggedFlats.some(f => f.key !== 'pv');
+
   if (flatResults.length > 0) {
-    if (flaggedFlats.length > 0) {
+    if (flaggedFlats.length > 0 || suddenCutoffDetected) {
+      const effectiveFlaggedFlats = flaggedFlats.length > 0 ? flaggedFlats : [pvFlatResult];
       // Distinguish "the whole gateway is offline" from "this one channel is
       // misconfigured" by checking whether another channel kept reporting
       // real, varying data during the EXACT SAME window the flagged channel
@@ -774,8 +827,8 @@ function runDiagnostic(parsed) {
       // varying normally, and the fix was a remote CT settings change, not
       // a connectivity check or power-cycle.
       let companionActive = false, companionLabel = null;
-      if (!wholeSystemOffline && flaggedFlats.length === 1) {
-        const flagged = flaggedFlats[0];
+      if (!wholeSystemOffline && effectiveFlaggedFlats.length === 1) {
+        const flagged = effectiveFlaggedFlats[0];
         const companionKey = flagged.key === 'load' ? 'grid' : flagged.key === 'grid' ? 'load' : null;
         if (companionKey) {
           const sd = stdDevInWindow(points, companionKey, flagged.result.startTime, flagged.result.endTime);
@@ -786,26 +839,48 @@ function runDiagnostic(parsed) {
         }
       }
 
-      const timeline = classifyTimelinePosition(flaggedFlats[0].result);
+      // Sudden-cutoff check — only meaningful for a single flagged PV
+      // channel (not a whole-system outage, which is already classified
+      // above). Distinguishes an abrupt mid-day stop (remote shutoff,
+      // breaker trip, or fault — these look identical in PV/Grid/Load data
+      // alone) from a normal gradual sunset decline, then cross-checks
+      // Grid to tell a PV-side event apart from a grid-side outage.
+      let gridUndisturbed = null;
+      if (suddenCutoffDetected) {
+        const gridSd = stdDevInWindow(points, 'grid', pvFlatResult.result.startTime, pvFlatResult.result.endTime);
+        gridUndisturbed = gridSd !== null ? gridSd > 50 : null;
+      }
+      const sudden = suddenCutoffDetected;
+
+      const timeline = classifyTimelinePosition(effectiveFlaggedFlats[0].result);
 
       items.push({
         type: 'issue',
-        headline: `[${timeline.tag}] ` + flaggedFlats.map(fc => `${fc.label} flat at ~${fc.result.value.toFixed(0)}W for ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+'h' : fc.result.count+' pts'}`).join('; '),
-        resolution: timeline.urgency,
-        seeing: flaggedFlats.map(fc => `${fc.label} held within ${fc.opts.toleranceW}W of ${fc.result.value.toFixed(0)}W for the longest stretch in the data — ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+' hours straight' : fc.result.count+' consecutive samples'}. Real channels essentially never hold this still for this long.`).join(' ')
+        headline: (sudden ? '[SUDDEN CUTOFF] ' : '') + `[${timeline.tag}] ` + effectiveFlaggedFlats.map(fc => `${fc.label} flat at ~${fc.result.value.toFixed(0)}W for ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+'h' : fc.result.count+' pts'}`).join('; '),
+        resolution: sudden ? 'verify whether this was intentional before treating it as a fault' : timeline.urgency,
+        seeing: effectiveFlaggedFlats.map(fc => `${fc.label} held within ${fc.opts.toleranceW}W of ${fc.result.value.toFixed(0)}W for the longest stretch in the data — ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+' hours straight' : fc.result.count+' consecutive samples'}. Real channels essentially never hold this still for this long.`).join(' ')
           + (wholeSystemOffline ? ' Both Production AND Consumption are flat at the same time (confirmed on each consumption leg individually too, not just the combined total) — that combination points at the whole gateway/Envoy being offline or unpowered, not a single dropped CT, since production and consumption use separate CTs that wouldn\'t normally fail at the exact same moment.' : '')
           + (companionActive ? ` ${companionLabel} continued reporting real, varying data during this exact window — that rules out a connectivity or power gap, since a comms dropout would affect every channel together, not just this one.` : '')
+          + (sudden ? ` Production was at ${pvDropShape.preDropValue.toFixed(0)}W immediately before this stretch began and dropped to near-zero within ${Math.round(pvDropShape.elapsedMinutes)} minutes — a real sunset takes much longer than that to fall from this much output, so this is a sudden cutoff, not a natural decline. ${gridUndisturbed === true ? 'Grid kept showing normal variation through the same window, meaning the house never lost power — this was a PV-side event specifically.' : gridUndisturbed === false ? 'Grid also went quiet during this same window, which is more consistent with a grid-side outage than a PV-only event.' : ''}` : '')
           + ` ${timeline.note}`,
-        recommendation: wholeSystemOffline
-          ? '<strong>Remote check:</strong> look at the gateway\'s current connectivity/last-seen status in Enlighten or Tesla One — if it\'s online and reporting right now, this was a temporary power or internet blip that\'s already resolved; note the date range and move on, no dispatch needed. If it\'s still offline live, ask the homeowner to power-cycle the gateway and their router/modem first — that resolves most comms gaps without a truck roll. <strong>If it escalates:</strong> only dispatch if it\'s still offline after a remote power-cycle attempt — at that point it\'s likely a hardware or wiring issue at the gateway itself, not a connectivity blip.'
-          : companionActive
-            ? `<strong>Remote check:</strong> since ${companionLabel} kept reporting normally through this window, the gateway is confirmed online — check this channel's CT configuration directly in the Installer Portal (CT enabled and correctly assigned, correct CT type/model selected, Load Only vs. Load with Solar setting) rather than connectivity. This approach has resolved confirmed field cases involving a clean, exact-zero channel reading like this one. <strong>If it escalates:</strong> if the configuration already looks correct, dispatch to verify the physical CT is latched and on the correct conductor.`
-            : '<strong>Remote check:</strong> pull up this channel\'s live reading right now — if it\'s moving again, this was a one-off data gap, not an active fault; note it and move on, no dispatch needed. <strong>If it escalates:</strong> if it\'s still flat live, verify the CT is still connected and latched, and that the gateway/inverter is actively reporting — a long, suspiciously flat stretch is the signature of a dropped channel, not just low real-world activity, and that\'s a truck-roll item.',
-        plainSummary: wholeSystemOffline
-          ? 'Monitoring lost connection for a stretch of time — usually a power or internet interruption at the site, not a problem with the solar equipment itself. If already back online, no action needed.'
-          : companionActive
-            ? 'One monitoring channel reads a flat zero while another channel on the same system kept reporting normally, which points to a configuration setting on that specific sensor rather than a lost connection. This is often correctable remotely.'
-            : 'This is a monitoring connection gap, not the equipment\'s ability to produce or use power. Confirm remotely whether it has already self-corrected before considering a visit.',
+        recommendation: sudden
+          ? (gridUndisturbed === false
+              ? '<strong>Remote check:</strong> Grid was also disrupted at the same moment, which points at a grid-side/utility outage rather than the PV system itself — confirm with the utility or check for a known outage in the area before treating this as an equipment fault.'
+              : '<strong>Remote check:</strong> a sudden mid-day cutoff like this is electrically identical whether it was a remote shutoff, a breaker switched off, or a genuine fault — the data can\'t tell those apart. Check first whether this was scheduled maintenance, a curtailment command, or someone switching a breaker before assuming a fault. <strong>If it escalates:</strong> if nothing intentional explains it, dispatch to check the inverter/breaker directly — Grid and Load behaving normally through this window rules out a connectivity or utility-side explanation.')
+          : (wholeSystemOffline
+            ? '<strong>Remote check:</strong> look at the gateway\'s current connectivity/last-seen status in Enlighten or Tesla One — if it\'s online and reporting right now, this was a temporary power or internet blip that\'s already resolved; note the date range and move on, no dispatch needed. If it\'s still offline live, ask the homeowner to power-cycle the gateway and their router/modem first — that resolves most comms gaps without a truck roll. <strong>If it escalates:</strong> only dispatch if it\'s still offline after a remote power-cycle attempt — at that point it\'s likely a hardware or wiring issue at the gateway itself, not a connectivity blip.'
+            : companionActive
+              ? `<strong>Remote check:</strong> since ${companionLabel} kept reporting normally through this window, the gateway is confirmed online — check this channel's CT configuration directly in the Installer Portal (CT enabled and correctly assigned, correct CT type/model selected, Load Only vs. Load with Solar setting) rather than connectivity. This approach has resolved confirmed field cases involving a clean, exact-zero channel reading like this one. <strong>If it escalates:</strong> if the configuration already looks correct, dispatch to verify the physical CT is latched and on the correct conductor.`
+              : '<strong>Remote check:</strong> pull up this channel\'s live reading right now — if it\'s moving again, this was a one-off data gap, not an active fault; note it and move on, no dispatch needed. <strong>If it escalates:</strong> if it\'s still flat live, verify the CT is still connected and latched, and that the gateway/inverter is actively reporting — a long, suspiciously flat stretch is the signature of a dropped channel, not just low real-world activity, and that\'s a truck-roll item.'),
+        plainSummary: sudden
+          ? (gridUndisturbed === false
+              ? 'Production stopped suddenly at the same time the home\'s grid connection also showed a disruption — more consistent with a utility/grid-side outage than a problem with the solar equipment itself.'
+              : 'Production stopped suddenly in the middle of the day rather than fading out gradually, while the rest of the home\'s power stayed normal. This could be an intentional shutoff (maintenance, a switched breaker) or an equipment fault — confirming which one happened is the next step.')
+          : (wholeSystemOffline
+            ? 'Monitoring lost connection for a stretch of time — usually a power or internet interruption at the site, not a problem with the solar equipment itself. If already back online, no action needed.'
+            : companionActive
+              ? 'One monitoring channel reads a flat zero while another channel on the same system kept reporting normally, which points to a configuration setting on that specific sensor rather than a lost connection. This is often correctable remotely.'
+              : 'This is a monitoring connection gap, not the equipment\'s ability to produce or use power. Confirm remotely whether it has already self-corrected before considering a visit.'),
       });
     } else {
       items.push({
@@ -1029,7 +1104,7 @@ function renderReport(report, parsed, filename) {
       <h3><span class="tag">${tagFor[it.type]}</span> ${it.headline}</h3>
       <div class="label">What I'm seeing</div>
       <p>${it.seeing}</p>
-      <div class="label">Recommendation</div>
+      <div class="label">${it.type==='issue' ? 'Recommendation' : 'Info'}</div>
       <p>${it.recommendation}</p>
       ${it.plainSummary ? `<div class="plain-summary"><div class="plain-summary-label${it.type==='confirmed' ? ' assurance' : ''}">${it.type==='confirmed' ? '✅ Assurance' : '💡 Insight'}</div><p>${it.plainSummary}</p></div>` : ''}
     </div>`).join('');
@@ -1254,6 +1329,22 @@ document.getElementById('micro-file-b').addEventListener('change', (e) => {
   if (e.target.files[0]) { microFileB = e.target.files[0]; document.getElementById('micro-filename-b').textContent = microFileB.name; }
 });
 
+function wireMicroDropzone(zoneId, slot) {
+  const zone = document.getElementById(zoneId);
+  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    if (slot === 'a') { microFileA = file; document.getElementById('micro-filename-a').textContent = file.name; }
+    else { microFileB = file; document.getElementById('micro-filename-b').textContent = file.name; }
+  });
+}
+wireMicroDropzone('micro-dropzone-a', 'a');
+wireMicroDropzone('micro-dropzone-b', 'b');
+
 function readFileText(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -1324,7 +1415,7 @@ function renderMicroResult(r) {
       <h3><span class="tag">${tagFor[f.type]}</span> ${f.headline}</h3>
       <div class="label">What I'm seeing</div>
       <p>${f.seeing}</p>
-      <div class="label">Recommendation</div>
+      <div class="label">${f.type==='issue' ? 'Recommendation' : 'Info'}</div>
       <p>${f.recommendation}</p>
     </div>`).join('');
 
