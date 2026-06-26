@@ -392,6 +392,33 @@ function differencedCorrelation(xs, ys) {
   const dys = ys.slice(1).map((v,i)=>v-ys[i]);
   return pearson(dxs, dys);
 }
+/** Computes differenced correlation per calendar day rather than once for
+ * the whole file, and returns whichever day is worst. A real multi-day
+ * cross-talk period can get diluted into a healthy-looking overall average
+ * if it's mixed with other, genuinely independent days — confirmed against
+ * a real file where the whole-file correlation read 0.23 (looks fine) but
+ * the first three days alone read 0.74 (the same range as a confirmed real
+ * cross-talk case), because three later, genuinely independent days pulled
+ * the blended average down. */
+function worstDayCorrelation(points) {
+  const byDay = new Map();
+  for (const p of points) {
+    const t = parseTimeSafe(p.time);
+    if (!t || p.pv === null || p.load === null) continue;
+    const dayKey = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+    if (!byDay.has(dayKey)) byDay.set(dayKey, { pv: [], load: [] });
+    byDay.get(dayKey).pv.push(p.pv);
+    byDay.get(dayKey).load.push(p.load);
+  }
+  let worst = null;
+  for (const [day, { pv, load }] of byDay) {
+    if (pv.length < 6) continue;
+    const r = differencedCorrelation(pv, load);
+    if (r === null) continue;
+    if (!worst || Math.abs(r) > Math.abs(worst.r)) worst = { day, r, n: pv.length };
+  }
+  return worst;
+}
 function checkBalance(points, tolerancePct=10, toleranceFloorW=150) {
   return points.filter(p=>p.load!==null).map(p=>{
     const expected = p.load - p.pv;
@@ -790,12 +817,19 @@ function runDiagnostic(parsed) {
   if (mode !== 'tesla_derived' && load.length === points.length && points.length >= 6) {
     const rawR = pearson(pv, load);
     const diffR = differencedCorrelation(pv, load);
+    const worstDay = worstDayCorrelation(points);
     if (diffR !== null) {
-      const concerning = Math.abs(diffR) > 0.6;
+      const overallConcerning = Math.abs(diffR) > 0.6;
+      const dayConcerning = worstDay && Math.abs(worstDay.r) > 0.6 && Math.abs(worstDay.r) > Math.abs(diffR) + 0.15;
+      const concerning = overallConcerning || dayConcerning;
       items.push({ type: concerning?'issue':'confirmed',
-        headline:`Production/Load step-change correlation: ${diffR.toFixed(2)} (raw: ${rawR!==null?rawR.toFixed(2):'—'})`,
+        headline: dayConcerning
+          ? `Production/Load step-change correlation: ${diffR.toFixed(2)} overall, but ${worstDay.r.toFixed(2)} on ${worstDay.day}`
+          : `Production/Load step-change correlation: ${diffR.toFixed(2)} (raw: ${rawR!==null?rawR.toFixed(2):'—'})`,
         resolution: concerning?'investigate possible CT cross-talk':'no cross-talk indicated',
-        seeing:'Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope.',
+        seeing: dayConcerning
+          ? `Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. The overall figure across the whole export looks fine, but that blends every day together — checked each calendar day individually, and ${worstDay.day} alone (${worstDay.n} points) shows ${worstDay.r.toFixed(2)}, in the same range as a confirmed real cross-talk case. A concentrated multi-day period like this can hide inside a healthy-looking overall average.`
+          : 'Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope.',
         recommendation: concerning
           ? '<strong>Remote check:</strong> run the CT Health Check on the Consumption meter — if it flags a polarity or branch issue, that\'s a faster, fully remote explanation worth ruling out first. Also worth pulling a second, different day (ideally one with choppy/cloud-broken production) — if Load tracks PV\'s wiggles tightly on that day too, that strengthens the case for real cross-talk rather than coincidence. <strong>If it escalates:</strong> if the health check is clean and the pattern holds on a second day, this needs a truck roll — genuine CT cross-talk means the Consumption CT is physically picking up the Production conductor\'s field, which is fixed by relocating/separating the CTs, not a software setting.'
           : 'Within the range consistent with independent, healthy measurement.',
