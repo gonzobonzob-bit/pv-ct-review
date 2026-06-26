@@ -548,7 +548,8 @@ function runDiagnostic(parsed) {
         headline: `Grid doesn't reconcile with Load−PV at ${flagged.length}/${balance.length} point(s)`,
         resolution: 'try remote CT health check first; escalate only if it comes back clean',
         seeing: `Largest deviation ${Math.max(...flagged.map(b=>Math.abs(b.deviation))).toFixed(0)}W.`,
-        recommendation: rec });
+        recommendation: rec,
+        customerNote: 'Your system\'s monitoring numbers don\'t quite add up the way they should — this is almost always a meter/sensor calibration issue, not a sign your solar isn\'t working. Many cases like this can be corrected remotely; if not, a brief technician visit will sort it out.' });
     } else {
       items.push({ type:'confirmed', headline:'Grid reconciles with Load−PV within tolerance', resolution:'no action needed',
         seeing:`All ${balance.length} points balance within tolerance (mean |dev| ${ (balance.reduce((s,b)=>s+Math.abs(b.deviation),0)/balance.length).toFixed(1) }W).`,
@@ -633,7 +634,8 @@ function runDiagnostic(parsed) {
         headline: consFlags.map(f=>`Consumption ${f.leg} flat at ~${f.value.toFixed(0)}W for ${f.durationHours!==null?f.durationHours.toFixed(1)+'h':f.count+' pts'}`).join('; '),
         resolution: 'confirm it\'s live, then dispatch if so',
         seeing: 'Consumption legs are independent circuits and aren\'t expected to track each other — but each one should still show normal variation on its own. A long flat stretch on just one leg can hide inside a healthy-looking combined Load total if the other leg keeps moving.',
-        recommendation: '<strong>Remote check:</strong> pull up the live per-leg consumption view in Enlighten/Installer Portal right now — if the flagged leg is moving again, this was a temporary data gap or a one-off communication blip, not an active fault; note it and move on. <strong>If it escalates:</strong> if the leg is still flat live, this needs a truck roll — per Enphase\'s meter-error guidance, the fix is almost always one of: the CT not fully latched/clamped (resting closed isn\'t enough), the blue/white lead wires crossed with the other leg\'s pair, or a disconnected neutral at the panel. None of those are remotely fixable, so don\'t spend more remote time on this one once it\'s confirmed live.' });
+        recommendation: '<strong>Remote check:</strong> pull up the live per-leg consumption view in Enlighten/Installer Portal right now — if the flagged leg is moving again, this was a temporary data gap or a one-off communication blip, not an active fault; note it and move on. <strong>If it escalates:</strong> if the leg is still flat live, this needs a truck roll — per Enphase\'s meter-error guidance, the fix is almost always one of: the CT not fully latched/clamped (resting closed isn\'t enough), the blue/white lead wires crossed with the other leg\'s pair, or a disconnected neutral at the panel. None of those are remotely fixable, so don\'t spend more remote time on this one once it\'s confirmed live.',
+        customerNote: 'This is about one of your home\'s monitoring sensors, not your solar system\'s ability to produce or use power. It usually needs a quick technician visit to fix a loose connection at the panel.' });
     } else {
       items.push({ type:'confirmed', headline:'No per-leg consumption dropout detected', resolution:'no action needed',
         seeing:'Checked each consumption leg independently (not just the combined total) for abnormally long constant-value stretches.',
@@ -653,7 +655,8 @@ function runDiagnostic(parsed) {
         seeing:'Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope.',
         recommendation: concerning
           ? '<strong>Remote check:</strong> run the CT Health Check on the Consumption meter — if it flags a polarity or branch issue, that\'s a faster, fully remote explanation worth ruling out first. Also worth pulling a second, different day (ideally one with choppy/cloud-broken production) — if Load tracks PV\'s wiggles tightly on that day too, that strengthens the case for real cross-talk rather than coincidence. <strong>If it escalates:</strong> if the health check is clean and the pattern holds on a second day, this needs a truck roll — genuine CT cross-talk means the Consumption CT is physically picking up the Production conductor\'s field, which is fixed by relocating/separating the CTs, not a software setting.'
-          : 'Within the range consistent with independent, healthy measurement.' });
+          : 'Within the range consistent with independent, healthy measurement.',
+        customerNote: concerning ? 'Your home\'s usage and your solar production are showing up a little too similarly in the monitoring data, which usually means two sensors are installed too close together rather than anything wrong with your system\'s actual performance. A technician visit will typically resolve it by repositioning a sensor.' : undefined });
     }
   }
 
@@ -668,6 +671,9 @@ function runDiagnostic(parsed) {
         recommendation: wholeSystemOffline
           ? '<strong>Remote check:</strong> look at the gateway\'s current connectivity/last-seen status in Enlighten or Tesla One — if it\'s online and reporting right now, this was a temporary power or internet blip that\'s already resolved; note the date range and move on, no dispatch needed. If it\'s still offline live, ask the homeowner to power-cycle the gateway and their router/modem first — that resolves most comms gaps without a truck roll. <strong>If it escalates:</strong> only dispatch if it\'s still offline after a remote power-cycle attempt — at that point it\'s likely a hardware or wiring issue at the gateway itself, not a connectivity blip.'
           : '<strong>Remote check:</strong> pull up this channel\'s live reading right now — if it\'s moving again, this was a one-off data gap, not an active fault; note it and move on, no dispatch needed. <strong>If it escalates:</strong> if it\'s still flat live, verify the CT is still connected and latched, and that the gateway/inverter is actively reporting — a long, suspiciously flat stretch is the signature of a dropped channel, not just low real-world activity, and that\'s a truck-roll item.',
+        customerNote: wholeSystemOffline
+          ? 'Your system\'s monitoring lost connection for a stretch of time — this is usually a power or internet interruption at your home, not a problem with your solar equipment itself. If it\'s already back online, no action is needed; if not, try unplugging and replugging in your monitoring gateway and home router.'
+          : 'This is about your monitoring connection, not your equipment\'s ability to produce or use power. We\'ll confirm remotely whether it has already corrected itself before considering a visit.',
       });
     } else {
       items.push({
@@ -709,6 +715,7 @@ function runDiagnostic(parsed) {
           resolution: 'check event log first; dispatch only if no fault is logged',
           seeing: `Typical daily peak across ${dayAnomaly.totalDays} days is ~${dayAnomaly.median.toFixed(0)}W. This run dropped to ${Math.min(...run.map(d=>d.peak)).toFixed(0)}–${Math.max(...run.map(d=>d.peak)).toFixed(0)}W for ${run.length} straight days — multiple consecutive days is a much stronger fault signal than a single low day, since weather rarely depresses output this much for this long while neighboring days nearby in the same dataset stay normal.`,
           recommendation: '<strong>Remote check:</strong> pull the gateway/microinverter event log in the Installer App for this exact date range — a logged fault code (e.g. grid profile trip, comms loss, ground fault) tells you the cause without a visit, and some fault types clear themselves once the underlying issue passes. <strong>If it escalates:</strong> if there\'s no fault code despite the drop, dispatch — that combination (real production loss, no system fault logged) points to something physical the system can\'t detect on its own: snow or debris coverage, a tripped breaker, or a downed branch shading the array. Confirm with the homeowner whether anything changed around the start date before the visit.',
+          customerNote: `Your system produced noticeably less power than usual for ${run.length} days in a row (${run[0].day} to ${run[run.length-1].day}). This is more than typical weather variation, so we're looking into the cause — it could be anything from a temporary fault that's already cleared to something like snow or debris on the panels. We'll follow up with what we find.`,
         });
       });
     }
