@@ -1464,6 +1464,7 @@ document.getElementById('micro-file-a').addEventListener('change', (e) => {
 document.getElementById('micro-file-b').addEventListener('change', (e) => {
   if (e.target.files[0]) { microFileB = e.target.files[0]; document.getElementById('micro-filename-b').textContent = microFileB.name; }
 });
+
 function wireMicroDropzone(zoneId, slot) {
   const zone = document.getElementById(zoneId);
   zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
@@ -1550,7 +1551,7 @@ function renderMicroResult(r) {
       <h3><span class="tag">${tagFor[f.type]}</span> ${f.headline}</h3>
       <div class="label">What I'm seeing</div>
       <p>${f.seeing}</p>
-      <div class="label">Recommendation</div>
+      <div class="label">${f.type==='issue' ? 'Recommendation' : 'Info'}</div>
       <p>${f.recommendation}</p>
     </div>`).join('');
 
