@@ -90,6 +90,7 @@
   .detail-card p{margin:4px 0 0; font-size:13px; color:var(--ink);}
   .plain-summary{margin-top:14px; padding:12px 14px; background:var(--card-alt); border:1px dashed var(--line); border-radius:8px;}
   .plain-summary-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--orange);}
+  .plain-summary-label.assurance{color:var(--green);}
   .plain-summary p{margin-top:6px; font-style:italic;}
 
   .meta-row{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:10px; flex-wrap:wrap; gap:6px;}
@@ -132,7 +133,7 @@
 
   <header>
     <span class="eyebrow">Diagnostic Tool</span>
-    <h1>PV CT Data Review</h1>
+    <h1>PV CT Data Reviewer</h1>
     <p>Drop in a CSV export for an instant diagnostic — negative-PV artifacts, Grid/Load balance, leg correlation, cross-talk detection. Runs entirely in your browser. No upload, no server, no AI call.</p>
   </header>
 
@@ -491,7 +492,25 @@ function classifyTimelinePosition(result) {
     note: 'Normal activity resumed after this gap and continued through to the most recent data — this already appears resolved, though identifying the root cause is still worthwhile to prevent a repeat.' };
 }
 
-function checkFlatline(points, key, { toleranceW = 5, minHours = 3, minPoints = 12, minMagnitudeW = 0, minFractionOfSpan = 0.85 } = {}) {
+/** Derives this site's own typical production window from the data itself
+ * (earliest and latest time-of-day with real output observed anywhere in
+ * the dataset), rather than assuming a fixed day/night split. A generic
+ * "16 hours is too long for a night" guess breaks at high latitudes in
+ * winter (genuinely 18+ hour nights) and doesn't adapt site-to-site; this
+ * calibrates the threshold from what this specific system actually does. */
+function computeSunWindow(points, key, threshold = 50) {
+  const minutesOfDay = [];
+  for (const p of points) {
+    if (p[key] === null || p[key] === undefined || p[key] <= threshold) continue;
+    const t = parseTimeSafe(p.time);
+    if (!t) continue;
+    minutesOfDay.push(t.getHours() * 60 + t.getMinutes());
+  }
+  if (minutesOfDay.length === 0) return null;
+  return { startTod: Math.min(...minutesOfDay), endTod: Math.max(...minutesOfDay) };
+}
+
+function checkFlatline(points, key, { toleranceW = 5, minHours = 3, minPoints = 12, minMagnitudeW = 0, minFractionOfSpan = 0.85, sunWindow = null } = {}) {
   const valid = points.filter(p => p[key] !== null && p[key] !== undefined);
   if (valid.length < minPoints) return null;
   const run = longestFlatRun(valid, key, toleranceW);
@@ -500,13 +519,25 @@ function checkFlatline(points, key, { toleranceW = 5, minHours = 3, minPoints = 
   const spanEnd = parseTimeSafe(valid[valid.length-1]?.time);
   const totalSpanHours = (spanStart && spanEnd) ? (spanEnd - spanStart) / 3600000 : null;
 
+  // When this site's own production window is known, calibrate the "too
+  // long to be a normal night" bar from its actual night length instead of
+  // the generic default — only when there's real production evidence
+  // somewhere in the data to calibrate against. If there's no evidence at
+  // all (e.g. the whole file is flat), sunWindow is null and behavior falls
+  // back to the original fixed threshold unchanged.
+  let effectiveMinHours = minHours;
+  if (sunWindow) {
+    const nightMinutes = 1440 - (sunWindow.endTod - sunWindow.startTod);
+    effectiveMinHours = Math.max(minHours, nightMinutes / 60 + 1); // +1h buffer
+  }
+
   // Absolute-duration check (works for full-day files: distinguishes a real
   // night from a genuinely long dropout). Relative-span check catches the
   // case an absolute threshold structurally can't: a partial-day export
   // (e.g. today's data, cut off mid-afternoon) where the flat run can never
   // reach the absolute threshold because the WHOLE file is shorter than it —
   // even though the flat run covers nearly all of the data that exists.
-  const longEnoughAbsolute = run.durationHours !== null ? run.durationHours >= minHours : run.count >= minPoints;
+  const longEnoughAbsolute = run.durationHours !== null ? run.durationHours >= effectiveMinHours : run.count >= minPoints;
   const longEnoughRelative = (totalSpanHours !== null && totalSpanHours >= 2 && run.durationHours !== null)
     ? (run.durationHours / totalSpanHours) >= minFractionOfSpan
     : false;
@@ -594,7 +625,8 @@ function runDiagnostic(parsed) {
     });
   } else {
     items.push({ type:'confirmed', headline:'No negative-PV artifact detected', resolution:'no action needed',
-      seeing:'PV stays at or above the noise floor throughout.', recommendation:'None.' });
+      seeing:'PV stays at or above the noise floor throughout.', recommendation:'None.',
+      plainSummary:'Production never reads backward — this rules out the most common CT-orientation problem on its own.' });
   }
 
   if (mode === 'load_with_solar') {
@@ -615,7 +647,8 @@ function runDiagnostic(parsed) {
     } else {
       items.push({ type:'confirmed', headline:'Grid reconciles with Load−PV within tolerance', resolution:'no action needed',
         seeing:`All ${balance.length} points balance within tolerance (mean |dev| ${ (balance.reduce((s,b)=>s+Math.abs(b.deviation),0)/balance.length).toFixed(1) }W).`,
-        recommendation:'None.' });
+        recommendation:'None.',
+        plainSummary:'Production, grid, and usage numbers add up the way they should — a good sign the CTs are reading accurately, not just running.' });
     }
   } else if (mode === 'tesla_derived') {
     items.push({ type:'info', headline:'Load is derived, not independently measured', resolution:'no separate Load CT to check',
@@ -638,8 +671,13 @@ function runDiagnostic(parsed) {
   // whole-system outage already being reported here (production AND
   // consumption totals both flat) — without duplicating the same root cause
   // as two separate alerts.
+  // Sun-hours calibration applies to the production channel only — Grid,
+  // Load, and Battery don't have a "daylight" concept, a household's
+  // baseline load shouldn't go to true zero overnight the way production
+  // legitimately does.
+  const pvSunWindow = computeSunWindow(points, 'pv');
   const flatChecks = [
-    { key: 'pv', label: mode === 'tesla_derived' ? 'Solar' : 'PV/Production', opts: { minHours: 16, toleranceW: 5 } },
+    { key: 'pv', label: mode === 'tesla_derived' ? 'Solar' : 'PV/Production', opts: { minHours: 16, toleranceW: 5, sunWindow: pvSunWindow } },
     { key: 'grid', label: mode === 'tesla_derived' ? 'Site' : 'Grid', opts: { minHours: 4, toleranceW: 5, minMagnitudeW: 50 } },
     { key: 'load', label: mode === 'tesla_derived' ? 'Load (derived)' : 'Load/Consumption', opts: { minHours: 3, toleranceW: 5 } },
   ];
@@ -701,7 +739,8 @@ function runDiagnostic(parsed) {
     } else {
       items.push({ type:'confirmed', headline:'No per-leg consumption dropout detected', resolution:'no action needed',
         seeing:'Checked each consumption leg independently (not just the combined total) for abnormally long constant-value stretches.',
-        recommendation:'None — note that the two legs are not expected to correlate with each other; that\'s normal for independent circuits, not a finding.' });
+        recommendation:'None — note that the two legs are not expected to correlate with each other; that\'s normal for independent circuits, not a finding.',
+        plainSummary:'Both consumption legs are reporting independently and normally — a dropout on either side would have shown up here even if the combined total looked fine.' });
     }
   }
 
@@ -718,7 +757,7 @@ function runDiagnostic(parsed) {
         recommendation: concerning
           ? '<strong>Remote check:</strong> run the CT Health Check on the Consumption meter — if it flags a polarity or branch issue, that\'s a faster, fully remote explanation worth ruling out first. Also worth pulling a second, different day (ideally one with choppy/cloud-broken production) — if Load tracks PV\'s wiggles tightly on that day too, that strengthens the case for real cross-talk rather than coincidence. <strong>If it escalates:</strong> if the health check is clean and the pattern holds on a second day, this needs a truck roll — genuine CT cross-talk means the Consumption CT is physically picking up the Production conductor\'s field, which is fixed by relocating/separating the CTs, not a software setting.'
           : 'Within the range consistent with independent, healthy measurement.',
-        plainSummary: concerning ? 'Usage and production are showing up a little too similarly in the data, which usually means two sensors are positioned too close together rather than anything wrong with actual system performance. Typically resolved by repositioning a sensor.' : undefined });
+        plainSummary: concerning ? 'Usage and production are showing up a little too similarly in the data, which usually means two sensors are positioned too close together rather than anything wrong with actual system performance. Typically resolved by repositioning a sensor.' : 'Production and usage are moving independently of each other, the way two correctly-placed, unrelated sensors should.' });
     }
   }
 
@@ -775,6 +814,7 @@ function runDiagnostic(parsed) {
         resolution: 'no action needed',
         seeing: `Checked ${flatResults.map(fc=>fc.label).join(', ')} for abnormally long constant-value stretches.`,
         recommendation: 'None — all channels show normal variation.',
+        plainSummary: 'Every channel shows the kind of natural variation a healthy, actively-reporting system should — no signs of a dropped sensor or offline gateway.',
       });
     }
   }
@@ -991,7 +1031,7 @@ function renderReport(report, parsed, filename) {
       <p>${it.seeing}</p>
       <div class="label">Recommendation</div>
       <p>${it.recommendation}</p>
-      ${it.plainSummary ? `<div class="plain-summary"><div class="plain-summary-label">💡 Insight</div><p>${it.plainSummary}</p></div>` : ''}
+      ${it.plainSummary ? `<div class="plain-summary"><div class="plain-summary-label${it.type==='confirmed' ? ' assurance' : ''}">${it.type==='confirmed' ? '✅ Assurance' : '💡 Insight'}</div><p>${it.plainSummary}</p></div>` : ''}
     </div>`).join('');
 
   resultsEl.style.display = 'block';
