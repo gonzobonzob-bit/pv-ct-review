@@ -94,6 +94,10 @@
 
   .meta-row{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:10px; flex-wrap:wrap; gap:6px;}
   .meta-row b{color:var(--ink); font-family:var(--mono);}
+  .chart-card{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:18px;}
+  .chart-legend{display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:8px;}
+  .chart-legend span{display:inline-flex; align-items:center; gap:6px;}
+  .chart-legend .dot{width:9px; height:9px; border-radius:50%; display:inline-block;}
 
   .btnbar{display:flex; justify-content:center; margin-top:8px;}
   button.reset{font-family:var(--sans); font-size:13px; font-weight:600; padding:9px 18px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--muted); cursor:pointer;}
@@ -148,6 +152,11 @@
       <span>Points analyzed: <b id="meta-points">—</b></span>
     </div>
 
+    <div class="chart-card" id="chart-card">
+      <div class="chart-legend" id="chart-legend"></div>
+      <div id="chart-svg-container"></div>
+    </div>
+
     <div class="status-banner" id="status-banner">
       <div class="icon" id="status-icon">🟢</div>
       <div class="text">
@@ -189,7 +198,7 @@
         <div class="btnbar" style="margin-top:18px;">
           <button class="primary-btn" onclick="runMicroCompare()">Compare →</button>
         </div>
-        <div class="upload-hint" style="margin-top:10px;">Per-microinverter export: DateTime, Average Real Power, DC Voltage, DC Current, AC Voltage, Temperature. This reads each module's own internal sensors — no CTs involved. Doesn't matter which file goes in which slot.</div>
+        <div class="upload-hint" style="margin-top:10px;">Per-microinverter export: DateTime, Average Real Power, DC Voltage, DC Current, AC Voltage, Temperature. This reads each module's own internal sensors — no CTs involved. File order does not affect the result.</div>
       </div>
 
       <div id="micro-error" class="error-box" style="display:none;"></div>
@@ -295,7 +304,22 @@ function rowsFromCSV(text) {
   if (table.length < 2) return { error: 'File has no data rows.' };
   const header = table[0];
   const schema = detectSchema(header);
-  if (schema.kind === 'unknown') return { error: schema.reason };
+  if (schema.kind === 'unknown') {
+    // Distinguish a genuinely empty/comms-error export from a real export
+    // in a format this tool does not yet support (e.g. QCells/Q.OMMAND,
+    // which has no parser here yet) — these call for different next steps,
+    // and surfacing the actual headers makes the gap actionable rather than
+    // a dead end.
+    const dataRows = table.slice(1);
+    const timeColGuess = header.findIndex(h => /date|time/i.test(h));
+    const totalCells = dataRows.reduce((s, r) => s + r.filter((c, idx) => idx !== timeColGuess).length, 0);
+    const filledCells = dataRows.reduce((s, r) => s + r.filter((c, idx) => idx !== timeColGuess && c.trim() !== '').length, 0);
+    const fillRate = totalCells > 0 ? filledCells / totalCells : 0;
+    if (fillRate < 0.1) {
+      return { error: `This file contains almost no usable data (${(fillRate*100).toFixed(0)}% of cells filled) — most consistent with a communication or export error rather than an unsupported file format. Re-export and confirm the date range before assuming a platform/format issue.` };
+    }
+    return { error: `${schema.reason} This file has real data but does not match a format currently supported by this tool (Enphase and Tesla export formats are mapped; others, including QCells/Q.OMMAND, are not yet). Column headers found: ${header.join(', ')}. Forward this file to extend support for this format.` };
+  }
 
   const timeIdxFound = header.findIndex(h => /^datetime$/i.test(h.trim())) !== -1
     ? header.findIndex(h => /^datetime$/i.test(h.trim()))
@@ -435,7 +459,36 @@ function longestFlatRun(points, key, toleranceW) {
   const startT = parseTimeSafe(points[best.startIdx]?.time);
   const endT = parseTimeSafe(points[best.endIdx]?.time);
   const durationHours = (startT && endT) ? (endT - startT) / 3600000 : null;
-  return { ...best, durationHours };
+  return { ...best, durationHours, startTime: startT, endTime: endT };
+}
+
+function stdDevInWindow(points, key, startTime, endTime) {
+  if (!startTime || !endTime) return null;
+  const vals = points
+    .filter(p => p[key] !== null && p[key] !== undefined)
+    .filter(p => { const t = parseTimeSafe(p.time); return t && t >= startTime && t <= endTime; })
+    .map(p => p[key]);
+  if (vals.length < 3) return null;
+  const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+  const variance = vals.reduce((a,b)=>a+(b-mean)**2,0)/vals.length;
+  return Math.sqrt(variance);
+}
+
+/** Classifies a flat run by where it sits in the visible timeline — the
+ * same duration/magnitude can mean very different things depending on
+ * position: a gap at the very start with normal data afterward looks like
+ * "not yet active" rather than a fault; a gap that never recovers before
+ * the data ends may still be unresolved right now, which is materially
+ * more urgent than a gap that already self-corrected mid-timeline. */
+function classifyTimelinePosition(result) {
+  if (result.atStart && result.atEnd) return { tag: 'NO ACTIVITY THIS WHOLE WINDOW', urgency: 'check install/commissioning status',
+    note: 'There is no real activity anywhere in this export, start to finish — confirm whether the system was active or even installed during this period before treating this as an outage.' };
+  if (result.atStart) return { tag: 'AT START OF DATA', urgency: 'verify commissioning date before ruling this in or out as a fault',
+    note: 'This gap sits at the very beginning of the available data, with normal activity resuming afterward. That is consistent with the system not yet being active or commissioned during this window — but it is equally consistent with a real outage that happens to align with the start of this particular export\'s date range. The data alone cannot tell these apart; confirm the actual install/commissioning date before concluding either way.' };
+  if (result.atEnd) return { tag: 'STILL ONGOING', urgency: 'may still be unresolved right now — prioritize',
+    note: 'This gap extends through the most recent data point available, with no recovery visible before the export ends — meaning it may still be active right now. Treat with more urgency than a gap that already resolved itself.' };
+  return { tag: 'RESOLVED', urgency: 'already resolved as of the latest data; root cause still worth confirming',
+    note: 'Normal activity resumed after this gap and continued through to the most recent data — this already appears resolved, though identifying the root cause is still worthwhile to prevent a repeat.' };
 }
 
 function checkFlatline(points, key, { toleranceW = 5, minHours = 3, minPoints = 12, minMagnitudeW = 0, minFractionOfSpan = 0.85 } = {}) {
@@ -459,7 +512,16 @@ function checkFlatline(points, key, { toleranceW = 5, minHours = 3, minPoints = 
     : false;
 
   const magnitudeOk = Math.abs(run.value) >= minMagnitudeW;
-  return { ...run, totalSpanHours, flagged: (longEnoughAbsolute || longEnoughRelative) && magnitudeOk };
+  // Timeline position matters for interpretation, not just duration: a flat
+  // run starting at the very first data point (atStart) with normal data
+  // afterward is consistent with "not yet installed/active" rather than a
+  // fault. A flat run ending at the very last data point (atEnd) — i.e. it
+  // never recovers before the export's visibility window runs out — means
+  // the gap may still be ongoing right now, which is a materially different
+  // (more urgent) situation than one that already resolved itself.
+  const atStart = run.startIdx === 0;
+  const atEnd = run.endIdx === valid.length - 1;
+  return { ...run, totalSpanHours, flagged: (longEnoughAbsolute || longEnoughRelative) && magnitudeOk, atStart, atEnd };
 }
 
 /** Groups points by calendar day (best-effort from the time string) and
@@ -498,7 +560,7 @@ function runDiagnostic(parsed) {
         type: 'info',
         headline: 'Not enough data to run diagnostics',
         resolution: 'check the export — likely the wrong file or a truncated/partial download',
-        seeing: `This file parsed to ${points.length} row(s) with complete PV/Grid/Load (or leg) values. That's too few for any of these checks (balance, correlation, leg-tracking, flatline) to mean anything — a "—" or a flagged check here would be a measurement of noise, not the system.`,
+        seeing: `This file parsed to ${points.length} row(s) with complete PV/Grid/Load (or leg) values. That is too few for any of these checks (balance, correlation, leg-tracking, flatline) to produce a meaningful result — any output from these checks would reflect measurement noise, not the actual system.`,
         recommendation: 'Re-export with a wider date range, or confirm this is the right file. This is not a finding about the PV system — it\'s a data availability issue.',
       }],
     };
@@ -514,12 +576,12 @@ function runDiagnostic(parsed) {
       recommendation = whileExporting
         ? '<strong>Remote check:</strong> open the Meter page in Tesla One\'s Device Setup and look at the Solar CT — if it shows the "Flip" indicator already set, the polarity itself may be fine and this is a smaller offset; confirm the CT is on the correct phase before assuming a fix is needed. <strong>If it escalates:</strong> if this persists into clear daylight hours (not just a brief low-light dip), dispatch to verify the CT is clamped on the correct conductor — note Tesla\'s system requires Solar > 0 and Site < 0 to charge from solar, so this can quietly block solar charging even while production itself is fine.'
         : '<strong>Remote check:</strong> in Tesla One\'s Device Setup → Meter page, check the "Flip" box on the Solar CT — Tesla\'s own UI states a negative reading "may indicate the CT is installed backwards or on the wrong phase." Toggling it is a fully remote fix if the CT is on the right phase, just oriented backward. <strong>If it escalates:</strong> if flipping doesn\'t produce a clean, sensible reading (or makes it worse), the CT is likely on the wrong phase rather than just backward — that needs a truck roll to re-clamp on the correct conductor, not another software flip. Some installers prefer the physical fix outright since a firmware update can occasionally reset the electronic flip.';
-      plainSummary = 'In plain terms: this is a monitoring sensor reading issue, not an indication that the panels have stopped producing power. It can also block the battery from charging from solar as expected, since the system requires a positive Solar reading to do that.';
+      plainSummary = 'This is a monitoring sensor reading issue, not an indication that the panels have stopped producing power. It can also block the battery from charging from solar as expected, since the system requires a positive Solar reading to do that.';
     } else {
       recommendation = whileExporting
         ? '<strong>Remote check:</strong> run the CT Health Check (Installer Portal → Devices → Production Meter → CT Summary → Verify CT) — it automatically checks polarity and tells you whether to use the Reverse Polarity button, fully remotely. If it flags polarity, flip it and allow 48 hours before re-checking — the fix won\'t show immediately, so don\'t re-flip same-day if it still looks off. <strong>If it escalates:</strong> if the health check instead flags missing branches or a phase mismatch, that\'s wiring, not polarity — dispatch with instructions to verify L1/L2/L3 phasing between the PV circuits and the gateway terminals.'
         : '<strong>Remote check:</strong> same tool — Installer Portal → Devices → Production Meter → CT Summary → Verify CT. This is Enphase\'s own automated polarity check; if it confirms a reversed CT, use the Reverse Polarity button right there (no truck roll) and allow 48 hours for new data before reusing the feature or re-checking. <strong>If it escalates:</strong> if the health check flags missing branches instead of pure polarity, or the reading doesn\'t correct after the 48-hour window, the CT is likely on the wrong phase — that\'s a physical re-clamp, not another software flip.';
-      plainSummary = 'In plain terms: a monitoring sensor is reading backward, not the panels failing to produce power. The system is very likely still making and using solar energy normally — this is a display/measurement correction, and in many cases that correction can be made remotely.';
+      plainSummary = 'A monitoring sensor is reading backward, not the panels failing to produce power. The system is very likely still making and using solar energy normally — this is a display/measurement correction, and in many cases that correction can be made remotely.';
     }
 
     items.push({
@@ -541,15 +603,15 @@ function runDiagnostic(parsed) {
     if (flagged.length > 0) {
       const sign = signConsistency(balance.map(b=>b.deviation));
       const ratio = ratioConsistency(balance.map(b=>({expected:b.expected, actual:b.actual})));
-      let rec = '<strong>Remote check:</strong> run the CT Health Check (Installer Portal → Devices → Production Meter → CT Summary → Verify CT) on both the Production and Grid/Consumption meters — it flags polarity issues and missing branches automatically. <strong>If it escalates:</strong> if the health check comes back clean, this needs a truck roll — check that the CT is on the correct phase and fully latched, and confirm the CT model/rated amperage configured at commissioning matches what\'s physically installed (a CT configured for the wrong amperage rating will scale every reading by a constant factor).';
+      let rec = '<strong>Remote check:</strong> run the CT Health Check (Installer Portal → Devices → Production Meter → CT Summary → Verify CT) on both the Production and Grid/Consumption meters — it flags polarity issues and missing branches automatically. <strong>If it escalates:</strong> if the health check comes back clean, dispatch is warranted — verify the CT is on the correct phase and fully latched, and confirm the CT model/rated amperage configured at commissioning matches what is physically installed. A CT configured for the wrong amperage rating will scale every reading by a constant factor.';
       if (ratio && ratio.consistent) rec = `Deviation ratio is consistent (≈${ratio.meanRatio.toFixed(2)}) — this is the signature of a fixed scale/configuration error, not a wiring fault. <strong>Remote check:</strong> in the Installer Portal, compare the CT ratio/model selected at commissioning against what\'s physically installed (printed on the CT body) — correcting a mismatched setting is a fully remote fix, no truck roll. <strong>If it escalates:</strong> if the configured CT already matches the physical unit and the ratio still holds steady, the physical CT itself may be the wrong model for this service size — that's a swap, not a config change.`;
-      else if (sign.consistent) rec = 'Deviation is one-directional but variable in size — more consistent with an untracked second source or CT non-linearity than a fixed multiplier or a simple wiring fault, so a quick remote config check is unlikely to fully resolve this. <strong>Remote check:</strong> run the CT Health Check anyway to rule out a simple polarity/branch issue first — it\'s fast and free. <strong>If it escalates:</strong> dispatch to physically verify CT phase/latch, and check for an untracked second production source (another inverter or string not reporting into this gateway) — don\'t expect a CT-only fix to fully explain a variable-magnitude pattern like this.';
+      else if (sign.consistent) rec = 'Deviation is one-directional but variable in size — more consistent with an untracked second source or CT non-linearity than a fixed multiplier or a simple wiring fault, so a remote configuration check is unlikely to fully resolve this on its own. <strong>Remote check:</strong> run the CT Health Check first regardless — it requires no truck roll and rules out a simple polarity or branch issue quickly. <strong>If it escalates:</strong> dispatch to physically verify CT phase and latch, and check for an untracked second production source (another inverter or string not reporting into this gateway) — a CT-only fix is unlikely to fully explain a variable-magnitude pattern like this.';
       items.push({ type:'issue',
         headline: `Grid doesn't reconcile with Load−PV at ${flagged.length}/${balance.length} point(s)`,
         resolution: 'try remote CT health check first; escalate only if it comes back clean',
         seeing: `Largest deviation ${Math.max(...flagged.map(b=>Math.abs(b.deviation))).toFixed(0)}W.`,
         recommendation: rec,
-        plainSummary: 'In plain terms: the production and consumption numbers don\'t add up the way they should — this is almost always a meter/sensor calibration issue, not a sign the solar system isn\'t working. Often correctable remotely; a brief site visit resolves the rest.' });
+        plainSummary: 'The production and consumption numbers don\'t add up the way they should — this is almost always a meter/sensor calibration issue, not a sign the solar system isn\'t working. Often correctable remotely; a brief site visit resolves the rest.' });
     } else {
       items.push({ type:'confirmed', headline:'Grid reconciles with Load−PV within tolerance', resolution:'no action needed',
         seeing:`All ${balance.length} points balance within tolerance (mean |dev| ${ (balance.reduce((s,b)=>s+Math.abs(b.deviation),0)/balance.length).toFixed(1) }W).`,
@@ -558,7 +620,7 @@ function runDiagnostic(parsed) {
   } else if (mode === 'tesla_derived') {
     items.push({ type:'info', headline:'Load is derived, not independently measured', resolution:'no separate Load CT to check',
       seeing:'On this export, Load = Solar + Site (+ Battery) exactly — confirmed by checking the numbers directly. Tesla systems typically have no separate Load CT; Load is calculated from the other three.',
-      recommendation:'There is nothing wrong with this — it is how the architecture works. It means a "Load looks off" complaint on a Tesla system should point you at Solar or Site/Battery CTs, not a Load CT that likely doesn\'t exist.' });
+      recommendation:'This is expected behavior, not a fault — it reflects how the architecture works. A reported issue with Load on a Tesla system should be directed to the Solar or Site/Battery CTs; there is typically no separate Load CT to investigate.' });
   } else {
     const isWhole = mode === 'whole_system';
     items.push({ type:'info', headline:'No Grid trace in this export', resolution:'balance check unavailable',
@@ -606,7 +668,7 @@ function runDiagnostic(parsed) {
     } else if (rProd < 0.5) {
       items.push({ type:'info', headline:`Produced L1/L2 leg correlation is low (${rProd.toFixed(2)})`, resolution:'worth a look only if this system has independent per-leg production CTs',
         seeing:'Production is commonly metered with a single CT on the combined conductors, split across L1/L2 for reporting — in that case, mirrored legs are expected and this number isn\'t informative either way.',
-        recommendation:'If you know this system actually has two separate per-leg production CTs (less common), a low number here is worth checking placement on. If it\'s the typical single-CT setup, this isn\'t a finding.' });
+        recommendation:'If this system is confirmed to have two separate per-leg production CTs (less common), a low number here is worth checking placement on. If it has the typical single-CT setup, this is not a finding.' });
     } else {
       items.push({ type:'info', headline:`Produced L1/L2 legs mirror each other (${rProd.toFixed(2)})`, resolution:'expected — not an independent CT health check',
         seeing:'This is normal: production is commonly a single CT on the combined conductors, reported as matching L1/L2 values rather than two independently-measured legs.',
@@ -634,8 +696,8 @@ function runDiagnostic(parsed) {
         headline: consFlags.map(f=>`Consumption ${f.leg} flat at ~${f.value.toFixed(0)}W for ${f.durationHours!==null?f.durationHours.toFixed(1)+'h':f.count+' pts'}`).join('; '),
         resolution: 'confirm it\'s live, then dispatch if so',
         seeing: 'Consumption legs are independent circuits and aren\'t expected to track each other — but each one should still show normal variation on its own. A long flat stretch on just one leg can hide inside a healthy-looking combined Load total if the other leg keeps moving.',
-        recommendation: '<strong>Remote check:</strong> pull up the live per-leg consumption view in Enlighten/Installer Portal right now — if the flagged leg is moving again, this was a temporary data gap or a one-off communication blip, not an active fault; note it and move on. <strong>If it escalates:</strong> if the leg is still flat live, this needs a truck roll — per Enphase\'s meter-error guidance, the fix is almost always one of: the CT not fully latched/clamped (resting closed isn\'t enough), the blue/white lead wires crossed with the other leg\'s pair, or a disconnected neutral at the panel. None of those are remotely fixable, so don\'t spend more remote time on this one once it\'s confirmed live.',
-        plainSummary: 'In plain terms: this is one consumption monitoring sensor, not the system\'s ability to produce or use power. Usually a quick fix for a loose connection at the panel.' });
+        recommendation: '<strong>Remote check:</strong> pull up the live per-leg consumption view in Enlighten/Installer Portal — if the flagged leg is moving again, this was a temporary data gap or a one-off communication blip, not an active fault; note it and close out. <strong>If it escalates:</strong> if the leg is still flat live, dispatch is warranted — per Enphase\'s meter-error guidance, the cause is almost always one of: the CT not fully latched/clamped (resting closed is not sufficient), the blue/white lead wires crossed with the other leg\'s pair, or a disconnected neutral at the panel. None of these can be corrected remotely, so further remote troubleshooting is not warranted once live status is confirmed.',
+        plainSummary: 'This is one consumption monitoring sensor, not the system\'s ability to produce or use power. Usually a quick fix for a loose connection at the panel.' });
     } else {
       items.push({ type:'confirmed', headline:'No per-leg consumption dropout detected', resolution:'no action needed',
         seeing:'Checked each consumption leg independently (not just the combined total) for abnormally long constant-value stretches.',
@@ -656,24 +718,55 @@ function runDiagnostic(parsed) {
         recommendation: concerning
           ? '<strong>Remote check:</strong> run the CT Health Check on the Consumption meter — if it flags a polarity or branch issue, that\'s a faster, fully remote explanation worth ruling out first. Also worth pulling a second, different day (ideally one with choppy/cloud-broken production) — if Load tracks PV\'s wiggles tightly on that day too, that strengthens the case for real cross-talk rather than coincidence. <strong>If it escalates:</strong> if the health check is clean and the pattern holds on a second day, this needs a truck roll — genuine CT cross-talk means the Consumption CT is physically picking up the Production conductor\'s field, which is fixed by relocating/separating the CTs, not a software setting.'
           : 'Within the range consistent with independent, healthy measurement.',
-        plainSummary: concerning ? 'In plain terms: usage and production are showing up a little too similarly in the data, which usually means two sensors are positioned too close together rather than anything wrong with actual system performance. Typically resolved by repositioning a sensor.' : undefined });
+        plainSummary: concerning ? 'Usage and production are showing up a little too similarly in the data, which usually means two sensors are positioned too close together rather than anything wrong with actual system performance. Typically resolved by repositioning a sensor.' : undefined });
     }
   }
 
   // ---------- Flatline / dropout scan results (computed earlier) ----------
   if (flatResults.length > 0) {
     if (flaggedFlats.length > 0) {
+      // Distinguish "the whole gateway is offline" from "this one channel is
+      // misconfigured" by checking whether another channel kept reporting
+      // real, varying data during the EXACT SAME window the flagged channel
+      // was flat. A live, varying companion channel rules out a connectivity
+      // gap (which would affect every channel together) and points instead
+      // at that specific channel's CT settings/configuration — confirmed in
+      // a real field case where Load read a clean, exact 0 while Grid kept
+      // varying normally, and the fix was a remote CT settings change, not
+      // a connectivity check or power-cycle.
+      let companionActive = false, companionLabel = null;
+      if (!wholeSystemOffline && flaggedFlats.length === 1) {
+        const flagged = flaggedFlats[0];
+        const companionKey = flagged.key === 'load' ? 'grid' : flagged.key === 'grid' ? 'load' : null;
+        if (companionKey) {
+          const sd = stdDevInWindow(points, companionKey, flagged.result.startTime, flagged.result.endTime);
+          if (sd !== null && sd > 100) {
+            companionActive = true;
+            companionLabel = flatChecks.find(fc => fc.key === companionKey)?.label || companionKey;
+          }
+        }
+      }
+
+      const timeline = classifyTimelinePosition(flaggedFlats[0].result);
+
       items.push({
         type: 'issue',
-        headline: flaggedFlats.map(fc => `${fc.label} flat at ~${fc.result.value.toFixed(0)}W for ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+'h' : fc.result.count+' pts'}`).join('; '),
-        resolution: wholeSystemOffline ? 'check live status + remote power-cycle before dispatch' : 'check for comms dropout, disconnected CT, or offline inverter/gateway',
-        seeing: flaggedFlats.map(fc => `${fc.label} held within ${fc.opts.toleranceW}W of ${fc.result.value.toFixed(0)}W for the longest stretch in the data — ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+' hours straight' : fc.result.count+' consecutive samples'}. Real channels essentially never hold this still for this long.`).join(' ') + (wholeSystemOffline ? ' Both Production AND Consumption are flat at the same time (confirmed on each consumption leg individually too, not just the combined total) — that combination points at the whole gateway/Envoy being offline or unpowered, not a single dropped CT, since production and consumption use separate CTs that wouldn\'t normally fail at the exact same moment.' : ''),
+        headline: `[${timeline.tag}] ` + flaggedFlats.map(fc => `${fc.label} flat at ~${fc.result.value.toFixed(0)}W for ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+'h' : fc.result.count+' pts'}`).join('; '),
+        resolution: timeline.urgency,
+        seeing: flaggedFlats.map(fc => `${fc.label} held within ${fc.opts.toleranceW}W of ${fc.result.value.toFixed(0)}W for the longest stretch in the data — ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+' hours straight' : fc.result.count+' consecutive samples'}. Real channels essentially never hold this still for this long.`).join(' ')
+          + (wholeSystemOffline ? ' Both Production AND Consumption are flat at the same time (confirmed on each consumption leg individually too, not just the combined total) — that combination points at the whole gateway/Envoy being offline or unpowered, not a single dropped CT, since production and consumption use separate CTs that wouldn\'t normally fail at the exact same moment.' : '')
+          + (companionActive ? ` ${companionLabel} continued reporting real, varying data during this exact window — that rules out a connectivity or power gap, since a comms dropout would affect every channel together, not just this one.` : '')
+          + ` ${timeline.note}`,
         recommendation: wholeSystemOffline
           ? '<strong>Remote check:</strong> look at the gateway\'s current connectivity/last-seen status in Enlighten or Tesla One — if it\'s online and reporting right now, this was a temporary power or internet blip that\'s already resolved; note the date range and move on, no dispatch needed. If it\'s still offline live, ask the homeowner to power-cycle the gateway and their router/modem first — that resolves most comms gaps without a truck roll. <strong>If it escalates:</strong> only dispatch if it\'s still offline after a remote power-cycle attempt — at that point it\'s likely a hardware or wiring issue at the gateway itself, not a connectivity blip.'
-          : '<strong>Remote check:</strong> pull up this channel\'s live reading right now — if it\'s moving again, this was a one-off data gap, not an active fault; note it and move on, no dispatch needed. <strong>If it escalates:</strong> if it\'s still flat live, verify the CT is still connected and latched, and that the gateway/inverter is actively reporting — a long, suspiciously flat stretch is the signature of a dropped channel, not just low real-world activity, and that\'s a truck-roll item.',
+          : companionActive
+            ? `<strong>Remote check:</strong> since ${companionLabel} kept reporting normally through this window, the gateway is confirmed online — check this channel's CT configuration directly in the Installer Portal (CT enabled and correctly assigned, correct CT type/model selected, Load Only vs. Load with Solar setting) rather than connectivity. This approach has resolved confirmed field cases involving a clean, exact-zero channel reading like this one. <strong>If it escalates:</strong> if the configuration already looks correct, dispatch to verify the physical CT is latched and on the correct conductor.`
+            : '<strong>Remote check:</strong> pull up this channel\'s live reading right now — if it\'s moving again, this was a one-off data gap, not an active fault; note it and move on, no dispatch needed. <strong>If it escalates:</strong> if it\'s still flat live, verify the CT is still connected and latched, and that the gateway/inverter is actively reporting — a long, suspiciously flat stretch is the signature of a dropped channel, not just low real-world activity, and that\'s a truck-roll item.',
         plainSummary: wholeSystemOffline
-          ? 'In plain terms: monitoring lost connection for a stretch of time — usually a power or internet interruption at the site, not a problem with the solar equipment itself. If already back online, no action needed.'
-          : 'In plain terms: this is a monitoring connection gap, not the equipment\'s ability to produce or use power. Confirm remotely whether it has already self-corrected before considering a visit.',
+          ? 'Monitoring lost connection for a stretch of time — usually a power or internet interruption at the site, not a problem with the solar equipment itself. If already back online, no action needed.'
+          : companionActive
+            ? 'One monitoring channel reads a flat zero while another channel on the same system kept reporting normally, which points to a configuration setting on that specific sensor rather than a lost connection. This is often correctable remotely.'
+            : 'This is a monitoring connection gap, not the equipment\'s ability to produce or use power. Confirm remotely whether it has already self-corrected before considering a visit.',
       });
     } else {
       items.push({
@@ -715,7 +808,7 @@ function runDiagnostic(parsed) {
           resolution: 'check event log first; dispatch only if no fault is logged',
           seeing: `Typical daily peak across ${dayAnomaly.totalDays} days is ~${dayAnomaly.median.toFixed(0)}W. This run dropped to ${Math.min(...run.map(d=>d.peak)).toFixed(0)}–${Math.max(...run.map(d=>d.peak)).toFixed(0)}W for ${run.length} straight days — multiple consecutive days is a much stronger fault signal than a single low day, since weather rarely depresses output this much for this long while neighboring days nearby in the same dataset stay normal.`,
           recommendation: '<strong>Remote check:</strong> pull the gateway/microinverter event log in the Installer App for this exact date range — a logged fault code (e.g. grid profile trip, comms loss, ground fault) tells you the cause without a visit, and some fault types clear themselves once the underlying issue passes. <strong>If it escalates:</strong> if there\'s no fault code despite the drop, dispatch — that combination (real production loss, no system fault logged) points to something physical the system can\'t detect on its own: snow or debris coverage, a tripped breaker, or a downed branch shading the array. Confirm with the homeowner whether anything changed around the start date before the visit.',
-          plainSummary: `In plain terms: production was noticeably below normal for ${run.length} days in a row (${run[0].day} to ${run[run.length-1].day}) — more than typical weather variation. Cause is still being confirmed; could range from a temporary fault that's already cleared to a physical obstruction like snow or debris.`,
+          plainSummary: `Production was noticeably below normal for ${run.length} days in a row (${run[0].day} to ${run[run.length-1].day}) — more than typical weather variation. Cause is still being confirmed; could range from a temporary fault that's already cleared to a physical obstruction like snow or debris.`,
         });
       });
     }
@@ -725,7 +818,7 @@ function runDiagnostic(parsed) {
         headline: `${isolated.length} isolated day(s) with lower-than-typical production`,
         resolution: 'likely weather — spot-check only if it recurs',
         seeing: `Typical daily peak across ${dayAnomaly.totalDays} days is ~${dayAnomaly.median.toFixed(0)}W. ${isolated.map(d=>`${d.day} peaked at only ${d.peak.toFixed(0)}W`).join('; ')}. These are single days, not part of a multi-day run.`,
-        recommendation: 'Most likely cloud cover or rain on those specific dates — isolated single-day dips happen even on healthy systems. Worth a glance at historical weather for those dates if you want to confirm, but not worth a dispatch on its own.',
+        recommendation: 'Most likely cloud cover or rain on the dates listed — isolated single-day dips occur even on healthy systems. A quick check of historical weather for those dates can confirm this, but does not warrant a dispatch on its own.',
       });
     }
   }
@@ -776,10 +869,98 @@ function handleFile(file) {
 
 function showError(msg) { errorBox.textContent = msg; errorBox.style.display = 'block'; }
 
+// Lightweight, dependency-free SVG line chart of the parsed time series —
+// a quick visual recreation of the original monitoring-portal chart, so the
+// data can be eyeballed alongside the automated findings rather than only
+// trusting the numbers.
+function renderChart(points, mode) {
+  const labels = {
+    pv: mode === 'tesla_derived' ? 'Solar' : (mode==='legs_only'||mode==='whole_system') ? 'Production' : 'PV',
+    grid: mode === 'tesla_derived' ? 'Site' : 'Grid',
+    load: (mode==='legs_only'||mode==='whole_system') ? 'Consumption' : 'Load',
+    batt: 'Battery',
+  };
+  const colors = { pv:'#5b8def', grid:'#e8923c', load:'#8b6fdb', batt:'#3aa6a0' };
+
+  const series = ['pv'];
+  if (points.some(p => p.grid !== null && p.grid !== undefined)) series.push('grid');
+  series.push('load');
+  if (mode === 'tesla_derived' && points.some(p => p.batt)) series.push('batt');
+
+  // Sample down for large files so the SVG stays light — a multi-thousand-row
+  // year of Tesla data doesn't need every point to show the overall shape.
+  const maxPoints = 300;
+  const step = Math.max(1, Math.ceil(points.length / maxPoints));
+  const sampled = points.filter((_, i) => i % step === 0);
+
+  const W = 720, H = 240, padL = 46, padR = 16, padT = 14, padB = 26;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+
+  let allVals = [];
+  series.forEach(k => sampled.forEach(p => { const v = p[k]; if (v !== null && v !== undefined && !Number.isNaN(v)) allVals.push(v); }));
+  if (allVals.length === 0) allVals = [0, 1];
+  let minV = Math.min(0, ...allVals), maxV = Math.max(0, ...allVals);
+  const span = (maxV - minV) || 1;
+  minV -= span * 0.08; maxV += span * 0.08;
+
+  const n = sampled.length;
+  const x = i => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const y = v => padT + plotH - ((v - minV) / (maxV - minV)) * plotH;
+  const zeroY = y(0);
+
+  const lines = series.map(k => {
+    const pts = sampled.map((p, i) => {
+      const v = p[k];
+      if (v === null || v === undefined || Number.isNaN(v)) return null;
+      return `${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+    }).filter(Boolean);
+    return `<polyline points="${pts.join(' ')}" fill="none" stroke="${colors[k]}" stroke-width="1.6"/>`;
+  }).join('');
+
+  const numXLabels = Math.min(6, n);
+  const firstT = parseTimeSafe(sampled[0]?.time);
+  const lastT = parseTimeSafe(sampled[n-1]?.time);
+  const spanHours = (firstT && lastT) ? (lastT - firstT) / 3600000 : null;
+  const multiDay = spanHours !== null && spanHours > 36;
+  const pad2 = (v) => String(v).padStart(2, '0');
+  const formatLabel = (rawTime) => {
+    const t = parseTimeSafe(rawTime);
+    if (!t) return (rawTime || '').toString().slice(0, 10);
+    return multiDay
+      ? `${pad2(t.getMonth()+1)}/${pad2(t.getDate())} ${pad2(t.getHours())}:${pad2(t.getMinutes())}`
+      : `${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
+  };
+  let xLabels = '';
+  for (let i = 0; i < numXLabels; i++) {
+    const idx = Math.round(i * (n - 1) / (numXLabels - 1 || 1));
+    const anchor = i === 0 ? 'start' : (i === numXLabels - 1 ? 'end' : 'middle');
+    xLabels += `<text x="${x(idx).toFixed(1)}" y="${H - 8}" font-size="9" fill="#6b7280" text-anchor="${anchor}" font-family="Courier New, monospace">${formatLabel(sampled[idx]?.time)}</text>`;
+  }
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;">
+    <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${W - padR}" y2="${zeroY.toFixed(1)}" stroke="#3a3e46" stroke-width="1" stroke-dasharray="3,3"/>
+    <text x="${padL - 6}" y="${(zeroY + 3).toFixed(1)}" font-size="9" fill="#6b7280" text-anchor="end" font-family="Courier New, monospace">0</text>
+    ${lines}
+    ${xLabels}
+  </svg>`;
+
+  document.getElementById('chart-legend').innerHTML = series.map(k =>
+    `<span><span class="dot" style="background:${colors[k]}"></span>${labels[k]}</span>`
+  ).join('');
+  document.getElementById('chart-svg-container').innerHTML = svg;
+}
+
 function renderReport(report, parsed, filename) {
   document.getElementById('meta-filename').textContent = filename;
-  document.getElementById('meta-mode').textContent = parsed.mode === 'load_with_solar' ? 'PV / Grid / Load' : parsed.mode === 'tesla_derived' ? 'Solar / Site (derived Load)' : 'Produced / Consumed by leg (no Grid trace)';
+  const modeLabels = {
+    load_with_solar: 'PV / Grid / Load',
+    tesla_derived: 'Solar / Site (derived Load)',
+    legs_only: 'Produced / Consumed by leg (no Grid trace)',
+    whole_system: 'Produced / Consumed, whole-system (no Grid trace, no legs)',
+  };
+  document.getElementById('meta-mode').textContent = modeLabels[parsed.mode] || parsed.mode;
   document.getElementById('meta-points').textContent = parsed.points.length;
+  renderChart(parsed.points, parsed.mode);
 
   const BANNER = {
     GOOD: { cls:'ok', icon:'🟢', headline:'GOOD' },
@@ -810,7 +991,7 @@ function renderReport(report, parsed, filename) {
       <p>${it.seeing}</p>
       <div class="label">Recommendation</div>
       <p>${it.recommendation}</p>
-      ${it.plainSummary ? `<div class="plain-summary"><div class="plain-summary-label">📋 Plain-language summary</div><p>${it.plainSummary}</p></div>` : ''}
+      ${it.plainSummary ? `<div class="plain-summary"><div class="plain-summary-label">💡 Insight</div><p>${it.plainSummary}</p></div>` : ''}
     </div>`).join('');
 
   resultsEl.style.display = 'block';
@@ -983,7 +1164,7 @@ function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Invert
       // amperage AND voltage both down = panel/connection issue, not shading
       findings.push({ type:'issue', headline:'DC side: amperage and voltage both down', resolution:`check the DC connection and module on ${lowerLabel}`,
         seeing:`${lowerLabel} runs low on both DC current (${(currentRatio*100).toFixed(0)}% of ${higherLabel}) and DC voltage (${(voltageRatio*100).toFixed(0)}%) in the gap window. Shading drops current while voltage holds up; here voltage drops too, which points at the panel-to-inverter connection or the module itself rather than an external obstruction.`,
-        recommendation:`Check the DC connector/MC4 connection between ${lowerLabel} and its module, and inspect the module for visible degradation (microcracks, delamination, hot spots). This doesn't look like shading.` });
+        recommendation:`Check the DC connector/MC4 connection between ${lowerLabel} and its module, and inspect the module for visible degradation (microcracks, delamination, hot spots). This pattern is not consistent with shading.` });
     } else {
       findings.push({ type:'confirmed', headline:'DC side: amperage and voltage both normal', resolution:'no DC-side issue found',
         seeing:`${lowerLabel}'s DC current (${(currentRatio*100).toFixed(0)}% of ${higherLabel}) and voltage (${(voltageRatio*100).toFixed(0)}%) are both in line with the comparison module during the gap window.`,
@@ -1020,13 +1201,11 @@ function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Invert
   if (!dc && !ac) {
     findings.push({ type:'info', headline:'Directional gap detected, but no DC/AC telemetry to confirm a cause', resolution:'re-run with a telemetry-inclusive export',
       seeing:`${lowerLabel} produces ${gapPct}% less, concentrated in the ${gapHalf === 'uniform' ? 'whole day evenly' : gapHalf}. No DC Voltage/Current or AC Voltage columns were available to narrow down why.`,
-      recommendation: gapHalf !== 'uniform' ? `Pattern is consistent with shading from the ${directionWord}, but that's a guess without DC/AC data to confirm it.` : 'No time-of-day pattern to go on either — telemetry data would help a lot here.' });
+      recommendation: gapHalf !== 'uniform' ? `Pattern is consistent with shading from the ${directionWord}, though this cannot be confirmed without DC/AC telemetry.` : 'No time-of-day pattern is present either — telemetry data would be needed to identify a likely cause.' });
   }
 
   return { lowerLabel, higherLabel, overallRatio, gapHalf, peakTod, morningRatio, afternoonRatio, dc, ac, findings, table };
 }
-
-
 let microFileA = null, microFileB = null;
 document.getElementById('micro-file-a').addEventListener('change', (e) => {
   if (e.target.files[0]) { microFileA = e.target.files[0]; document.getElementById('micro-filename-a').textContent = microFileA.name; }
@@ -1121,7 +1300,6 @@ function resetMicro() {
   document.getElementById('micro-error').style.display = 'none';
   document.getElementById('micro-results').style.display = 'none';
 }
-
 </script>
 </body>
 </html>
