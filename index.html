@@ -4,339 +4,135 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PV CT Diagnostic — Data Review</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --blue: #1d4ed8;
-    --blue-light: #eff6ff;
-    --blue-mid: #bfdbfe;
-    --red: #dc2626;
-    --red-light: #fef2f2;
-    --red-mid: #fecaca;
-    --green: #16a34a;
-    --green-light: #f0fdf4;
-    --green-mid: #bbf7d0;
-    --amber: #b45309;
-    --amber-light: #fffbeb;
-    --amber-mid: #fde68a;
-    --bg: #f1f5f9;
-    --card: #ffffff;
-    --ink: #0f172a;
-    --ink-2: #334155;
-    --muted: #64748b;
-    --line: #e2e8f0;
-    --line-2: #f1f5f9;
-    --mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
-    --shadow: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
-  }
+  :root{
+    /* Dark / orange-accent theme — directional shift toward the internal
+       ops-tool reference look. Status colors (green/red/amber) stay bold,
+       saturated blocks; orange is the brand/action accent, used sparingly
+       (buttons, active states, the eyebrow badge) rather than as a big
+       header fill. */
+    --bg:#14161a;
+    --card:#1b1e24;
+    --card-alt:#20232a;
+    --line:#2a2e36;
+    --ink:#eef0f3;
+    --muted:#9aa0ab;
+    --orange:#f5821f;
+    --orange-light:#ff9a3d;
+    --orange-bg:#2e2010;
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+    --green:#3fbd72;     --green-bg:#15261c;   --green-line:#234a32;
+    --red:#ef5b52;       --red-bg:#2c1816;     --red-line:#4a2723;
+    --amber:#e3a23a;     --amber-bg:#2c2210;   --amber-line:#4a3a1a;
 
-  body {
-    background: var(--bg);
-    color: var(--ink);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-    padding: 32px 20px 64px;
+    --mono:'Courier New', Courier, monospace;
+    --sans:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); padding:24px; line-height:1.45;}
+  .wrap{max-width:760px; margin:0 auto;}
 
-  .wrap { max-width: 760px; margin: 0 auto; }
+  .eyebrow{
+    display:inline-block; font-size:11px; font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+    color:var(--orange); background:var(--orange-bg); border:1px solid #4a3318; border-radius:5px;
+    padding:3px 9px; margin-bottom:10px;
+  }
+  header{margin-bottom:18px;}
+  header h1{margin:0 0 4px; font-size:21px; color:var(--ink);}
+  header p{margin:0; color:var(--muted); font-size:13px; max-width:560px;}
 
-  /* HEADER */
-  .page-header {
-    margin-bottom: 28px;
+  .upload-card{
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    padding:24px; margin-bottom:18px; text-align:center;
   }
-  .page-header .badge {
-    display: inline-block;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: .06em;
-    text-transform: uppercase;
-    color: var(--blue);
-    background: var(--blue-light);
-    border: 1px solid var(--blue-mid);
-    border-radius: 4px;
-    padding: 2px 8px;
-    margin-bottom: 10px;
+  .upload-card.dragover{border-color:var(--orange); background:var(--card-alt);}
+  .upload-card input[type=file]{display:none;}
+  .upload-label{
+    display:inline-block; background:var(--orange); color:#1a1006; font-size:13px; font-weight:700;
+    padding:10px 18px; border-radius:6px; cursor:pointer; border:none;
   }
-  .page-header h1 {
-    font-size: 22px;
-    font-weight: 600;
-    color: var(--ink);
-    margin-bottom: 6px;
-    letter-spacing: -.01em;
-  }
-  .page-header p {
-    font-size: 13.5px;
-    color: var(--muted);
-    line-height: 1.6;
-  }
+  .upload-label:hover{background:var(--orange-light);}
+  .upload-hint{font-size:12px; color:var(--muted); margin-top:10px;}
+  .filename{font-family:var(--mono); font-size:12.5px; color:var(--ink); margin-top:10px;}
+  .error-box{background:var(--red-bg); border:1px solid var(--red-line); color:var(--red); border-radius:8px; padding:12px 16px; font-size:13px; margin-bottom:18px;}
 
-  /* UPLOAD */
-  .upload-card {
-    background: var(--card);
-    border: 1.5px dashed var(--line);
-    border-radius: 12px;
-    padding: 36px 24px;
-    margin-bottom: 18px;
-    text-align: center;
-    transition: border-color .18s, background .18s;
-    cursor: default;
-  }
-  .upload-card.dragover {
-    border-color: var(--blue);
-    background: var(--blue-light);
-  }
-  .upload-card input[type=file] { display: none; }
-  .upload-icon { font-size: 28px; margin-bottom: 12px; opacity: .5; }
-  .upload-label {
-    display: inline-block;
-    background: var(--blue);
-    color: #fff;
-    font-size: 13px;
-    font-weight: 500;
-    padding: 9px 20px;
-    border-radius: 7px;
-    cursor: pointer;
-    transition: opacity .15s;
-    letter-spacing: .01em;
-  }
-  .upload-label:hover { opacity: .88; }
-  .upload-hint { font-size: 12.5px; color: var(--muted); margin-top: 10px; }
-  .filename {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--blue);
-    margin-top: 10px;
-    font-weight: 500;
-  }
+  .status-banner{border-radius:10px 10px 0 0; padding:18px 22px; color:#fff; display:flex; align-items:center; gap:14px;}
+  .status-banner.flag{background:var(--red);}
+  .status-banner.ok{background:var(--green);}
+  .status-banner.warn{background:var(--amber);}
+  .status-banner .icon{font-size:30px; line-height:1;}
+  .status-banner .text h2{margin:0; font-size:19px; color:#fff;}
+  .status-banner .text p{margin:2px 0 0; font-size:12.5px; opacity:.92; color:#fff;}
 
-  .error-box {
-    background: var(--red-light);
-    border: 1px solid var(--red-mid);
-    color: var(--red);
-    border-radius: 8px;
-    padding: 12px 16px;
-    font-size: 13px;
-    margin-bottom: 18px;
-    font-family: var(--mono);
-  }
+  .quick-section{background:var(--card); border:1px solid var(--line); border-top:none; border-radius:0 0 10px 10px; padding:4px 0 8px; margin-bottom:22px;}
+  .quick-line{display:flex; align-items:flex-start; gap:10px; padding:11px 22px; border-bottom:1px solid var(--line); text-decoration:none; color:var(--ink);}
+  .quick-line:last-child{border-bottom:none;}
+  .quick-line:hover{background:var(--card-alt);}
+  .quick-line .bullet{font-size:15px; flex-shrink:0; width:18px; text-align:center; margin-top:1px;}
+  .quick-line .bullet.issue{color:var(--red);}
+  .quick-line .bullet.confirmed{color:var(--green);}
+  .quick-line .bullet.info{color:var(--amber);}
+  .quick-line .line-text{font-size:13.5px; color:var(--ink);}
+  .quick-line .line-text b{font-weight:700;}
+  .quick-line .jump{margin-left:auto; font-size:11.5px; color:var(--muted); white-space:nowrap; padding-left:10px;}
 
-  /* META */
-  .meta-row {
-    display: flex;
-    gap: 20px;
-    flex-wrap: wrap;
-    font-size: 12px;
-    color: var(--muted);
-    margin-bottom: 12px;
-  }
-  .meta-row b { color: var(--ink-2); font-family: var(--mono); font-weight: 500; }
+  .section-title{font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--orange); margin:0 0 12px;}
+  .detail-card{background:var(--card); border:1px solid var(--line); border-left:4px solid var(--line); border-radius:8px; padding:16px 20px; margin-bottom:14px;}
+  .detail-card.issue{border-left-color:var(--red);}
+  .detail-card.confirmed{border-left-color:var(--green);}
+  .detail-card.info{border-left-color:var(--amber);}
+  .detail-card h3{margin:0 0 10px; font-size:14.5px; display:flex; align-items:center; gap:8px; color:var(--ink);}
+  .detail-card h3 .tag{font-size:10px; text-transform:uppercase; letter-spacing:.4px; font-weight:800; padding:2px 8px; border-radius:10px;}
+  .detail-card.issue h3 .tag{background:var(--red-bg); color:var(--red);}
+  .detail-card.confirmed h3 .tag{background:var(--green-bg); color:var(--green);}
+  .detail-card.info h3 .tag{background:var(--amber-bg); color:var(--amber);}
+  .detail-card .label{font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:700; margin-top:10px;}
+  .detail-card p{margin:4px 0 0; font-size:13px; color:var(--ink);}
+  .customer-note{margin-top:14px; padding:12px 14px; background:var(--card-alt); border:1px dashed var(--line); border-radius:8px;}
+  .customer-note-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--orange);}
+  .customer-note p{margin-top:6px; font-style:italic;}
 
-  /* STATUS BANNER */
-  .status-banner {
-    border-radius: 10px 10px 0 0;
-    padding: 16px 20px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    border: 1px solid var(--line);
-    border-bottom: none;
-    background: var(--card);
-    border-left-width: 4px;
-  }
-  .status-banner.flag {
-    border-color: var(--red-mid);
-    border-left-color: var(--red);
-    background: var(--red-light);
-  }
-  .status-banner.ok {
-    border-color: var(--green-mid);
-    border-left-color: var(--green);
-    background: var(--green-light);
-  }
-  .status-banner .icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
-  .status-banner .text h2 { font-size: 15px; font-weight: 600; letter-spacing: .04em; }
-  .status-banner.flag .text h2 { color: var(--red); }
-  .status-banner.ok .text h2 { color: var(--green); }
-  .status-banner .text p { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .meta-row{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:10px; flex-wrap:wrap; gap:6px;}
+  .meta-row b{color:var(--ink); font-family:var(--mono);}
 
-  /* QUICK SECTION */
-  .quick-section {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-top: none;
-    border-radius: 0 0 10px 10px;
-    padding: 2px 0 6px;
-    margin-bottom: 24px;
-    box-shadow: var(--shadow);
-  }
-  .quick-line {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 11px 20px;
-    border-bottom: 1px solid var(--line-2);
-    text-decoration: none;
-    color: var(--ink-2);
-    transition: background .12s;
-  }
-  .quick-line:last-child { border-bottom: none; }
-  .quick-line:hover { background: #f8fafc; }
-  .quick-line .bullet { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; margin-top: 1px; }
-  .quick-line .bullet.issue { color: var(--red); }
-  .quick-line .bullet.confirmed { color: var(--green); }
-  .quick-line .bullet.info { color: var(--amber); }
-  .quick-line .line-text { font-size: 13.5px; line-height: 1.5; }
-  .quick-line .line-text b { font-weight: 600; color: var(--ink); }
-  .quick-line .jump { margin-left: auto; font-size: 11.5px; color: var(--muted); white-space: nowrap; padding-left: 10px; }
+  .btnbar{display:flex; justify-content:center; margin-top:8px;}
+  button.reset{font-family:var(--sans); font-size:13px; font-weight:600; padding:9px 18px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--muted); cursor:pointer;}
+  button.reset:hover{background:var(--card-alt); color:var(--ink);}
+  button.primary-btn{font-family:var(--sans); font-size:13px; font-weight:700; padding:10px 18px; border-radius:6px; border:none; background:var(--orange); color:#1a1006; cursor:pointer;}
+  button.primary-btn:hover{background:var(--orange-light);}
 
-  /* SECTION TITLE */
-  .section-title {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    color: var(--muted);
-    margin: 0 0 10px;
-  }
+  #results{display:none;}
+  footer{text-align:center; font-size:11px; color:var(--muted); margin-top:18px;}
 
-  /* DETAIL CARDS */
-  .detail-card {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-left: 4px solid var(--line);
-    border-radius: 8px;
-    padding: 16px 20px;
-    margin-bottom: 12px;
-    box-shadow: var(--shadow);
+  /* Microinverter section — demoted to a collapsed disclosure at the
+     bottom of the page for now. Native <details>/<summary> needs no JS
+     to expand/collapse and stays keyboard/accessibility-friendly. */
+  .micro-disclosure{margin-top:36px; border-top:1px solid var(--line); padding-top:18px;}
+  .micro-disclosure summary{
+    cursor:pointer; font-size:13px; font-weight:700; color:var(--muted);
+    list-style:none; display:flex; align-items:center; gap:8px; padding:6px 0;
   }
-  .detail-card.issue { border-left-color: var(--red); }
-  .detail-card.confirmed { border-left-color: var(--green); }
-  .detail-card.info { border-left-color: var(--amber); }
-  .detail-card h3 {
-    margin: 0 0 10px;
-    font-size: 14px;
-    font-weight: 500;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    line-height: 1.4;
-  }
-  .detail-card h3 .tag {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: .06em;
-    font-weight: 700;
-    padding: 2px 7px;
-    border-radius: 4px;
-    flex-shrink: 0;
-  }
-  .detail-card.issue h3 .tag { background: var(--red-light); color: var(--red); border: 1px solid var(--red-mid); }
-  .detail-card.confirmed h3 .tag { background: var(--green-light); color: var(--green); border: 1px solid var(--green-mid); }
-  .detail-card.info h3 .tag { background: var(--amber-light); color: var(--amber); border: 1px solid var(--amber-mid); }
-  .detail-card .label {
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: .07em;
-    color: var(--muted);
-    font-weight: 600;
-    margin-top: 12px;
-    margin-bottom: 3px;
-  }
-  .detail-card p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.65; }
+  .micro-disclosure summary::-webkit-details-marker{display:none;}
+  .micro-disclosure summary::before{content:'▸'; color:var(--orange); transition:transform .15s;}
+  .micro-disclosure[open] summary::before{transform:rotate(90deg);}
+  .micro-disclosure summary:hover{color:var(--ink);}
+  .micro-body{padding-top:16px;}
 
-  /* META */
-  .btnbar { display: flex; justify-content: center; margin-top: 10px; }
-  button.reset {
-    font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    padding: 8px 18px;
-    border-radius: 7px;
-    border: 1px solid var(--line);
-    background: var(--card);
-    color: var(--muted);
-    cursor: pointer;
-    transition: border-color .15s, color .15s;
-    box-shadow: var(--shadow);
-  }
-  button.reset:hover { border-color: #cbd5e1; color: var(--ink); }
-
-  #results { display: none; }
-
-  /* FOOTER */
-  footer {
-    margin-top: 40px;
-    padding-top: 20px;
-    border-top: 1px solid var(--line);
-  }
-  .footer-checks {
-    font-size: 11.5px;
-    color: var(--muted);
-    margin-bottom: 10px;
-    line-height: 1.7;
-  }
-  .footer-disclaimer {
-    font-size: 11px;
-    color: #94a3b8;
-    line-height: 1.75;
-    max-width: 680px;
-  }
-  .footer-disclaimer strong { color: var(--muted); }
-
-  @media (max-width: 580px) {
-    body { padding: 20px 16px 48px; }
-    .meta-row { flex-direction: column; gap: 4px; }
-    .quick-line .jump { display: none; }
-    .two-col { grid-template-columns: 1fr; }
-  }
-
-  /* NAV TABS */
-  .nav-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
-  .nav-tab {
-    flex: 1; text-align: center; padding: 10px 12px; border-radius: 8px;
-    border: 1px solid var(--line); background: var(--card); color: var(--muted);
-    font-size: 12.5px; font-weight: 500; cursor: pointer;
-    transition: background .12s, color .12s, border-color .12s;
-    box-shadow: var(--shadow);
-  }
-  .nav-tab.active { background: var(--blue); color: #fff; border-color: var(--blue); }
-  .nav-tab:hover:not(.active) { background: #f8fafc; color: var(--ink); }
-
-  /* STATUS WARN (micro tool amber state) */
-  .status-banner.warn { border-color: var(--amber-mid); border-left-color: var(--amber); background: var(--amber-light); }
-  .status-banner.warn .text h2 { color: var(--amber); }
-  .detail-card.warn { border-left-color: var(--amber); }
-  .detail-card.warn h3 .tag { background: var(--amber-light); color: var(--amber); border: 1px solid var(--amber-mid); }
-
-  /* MICRO TOOL */
-  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .upload-card h4 { margin: 0 0 10px; font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
-  .micro-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
-  .micro-table th { text-align: left; padding: 5px 8px; color: var(--muted); border-bottom: 2px solid var(--line); font-weight: 600; }
-  .micro-table td { padding: 4px 8px; border-bottom: 1px solid var(--line-2); font-family: var(--mono); }
+  .two-col{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  @media (max-width:540px){ .two-col{grid-template-columns:1fr;} }
+  .upload-card h4{margin:0 0 10px; font-size:12.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px;}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <div class="page-header">
-    <div class="badge">Diagnostic Tool</div>
+  <header>
+    <span class="eyebrow">Diagnostic Tool</span>
     <h1>PV CT Data Review</h1>
     <p>Drop in a CSV export for an instant diagnostic — negative-PV artifacts, Grid/Load balance, leg correlation, cross-talk detection. Runs entirely in your browser. No upload, no server, no AI call.</p>
-  </div>
+  </header>
 
-  <div class="nav-tabs">
-    <div class="nav-tab active" id="tab-ct" onclick="showSection('ct')">📊 System CT Review</div>
-    <div class="nav-tab" id="tab-micro" onclick="showSection('micro')">🔧 Microinverter Troubleshooting</div>
-  </div>
-
-  <div id="section-ct">
   <div class="upload-card" id="upload-card">
-    <div class="upload-icon">☁</div>
     <label class="upload-label" for="file-input">Choose CSV file</label>
     <input type="file" id="file-input" accept=".csv">
     <div class="upload-hint">or drag and drop a .csv file here</div>
@@ -369,287 +165,51 @@
       <button class="reset" onclick="resetTool()">↺ Reset / load another file</button>
     </div>
   </div>
-  </div><!-- /section-ct -->
 
-  <div id="section-micro" style="display:none;">
-    <div class="upload-card" style="text-align:left;">
-      <div class="two-col">
-        <div>
-          <h4>Inverter A (suspect / lower producer)</h4>
-          <label class="upload-label" for="micro-file-a">Choose CSV</label>
-          <input type="file" id="micro-file-a" accept=".csv">
-          <div class="filename" id="micro-filename-a"></div>
-        </div>
-        <div>
-          <h4>Inverter B (reference / comparison)</h4>
-          <label class="upload-label" for="micro-file-b">Choose CSV</label>
-          <input type="file" id="micro-file-b" accept=".csv">
-          <div class="filename" id="micro-filename-b"></div>
-        </div>
-      </div>
-      <div class="btnbar" style="margin-top:18px;">
-        <button class="reset" style="background:var(--blue); color:#fff; border-color:var(--blue);" onclick="runMicroCompare()">Compare →</button>
-      </div>
-      <div class="upload-hint" style="margin-top:10px;">Per-microinverter export: DateTime, Average Real Power, DC Voltage, DC Current, Temperature. Doesn't matter which file goes in which slot — the tool figures out which one's actually lower.</div>
-    </div>
+  <footer>Checks: negative-PV diagnosis, Grid=Load−PV balance (when available), leg-balance, per-leg consumption flatline, Production/Load step-change correlation (cross-talk check).</footer>
 
-    <div id="micro-error" class="error-box" style="display:none;"></div>
-
-    <div id="micro-results" style="display:none;">
-      <div class="status-banner" id="micro-banner">
-        <div class="icon" id="micro-icon">🟡</div>
-        <div class="text">
-          <h2 id="micro-headline"></h2>
-          <p id="micro-summary"></p>
+  <details class="micro-disclosure">
+    <summary>Microinverter Troubleshooting (beta) — internal DC/AC diagnostic, separate from CT metering</summary>
+    <div class="micro-body">
+      <div class="upload-card" style="text-align:left;">
+        <div class="two-col">
+          <div>
+            <h4>Inverter A (suspect / lower producer)</h4>
+            <label class="upload-label" for="micro-file-a">Choose CSV</label>
+            <input type="file" id="micro-file-a" accept=".csv">
+            <div class="filename" id="micro-filename-a"></div>
+          </div>
+          <div>
+            <h4>Inverter B (reference / comparison)</h4>
+            <label class="upload-label" for="micro-file-b">Choose CSV</label>
+            <input type="file" id="micro-file-b" accept=".csv">
+            <div class="filename" id="micro-filename-b"></div>
+          </div>
         </div>
+        <div class="btnbar" style="margin-top:18px;">
+          <button class="primary-btn" onclick="runMicroCompare()">Compare →</button>
+        </div>
+        <div class="upload-hint" style="margin-top:10px;">Per-microinverter export: DateTime, Average Real Power, DC Voltage, DC Current, AC Voltage, Temperature. This reads each module's own internal sensors — no CTs involved. Doesn't matter which file goes in which slot.</div>
       </div>
-      <div class="detail-card" id="micro-detail" style="border-radius:0 0 8px 8px; border-top:none;">
-        <div class="label">What I'm seeing</div>
-        <p id="micro-seeing"></p>
-        <div class="label">Recommendation</div>
-        <p id="micro-recommendation"></p>
-        <div class="label">Supporting numbers</div>
-        <table class="micro-table" id="micro-table"></table>
-      </div>
-      <div class="btnbar" style="margin-top:14px;">
-        <button class="reset" onclick="resetMicro()">↺ Reset / load different files</button>
+
+      <div id="micro-error" class="error-box" style="display:none;"></div>
+
+      <div id="micro-results" style="display:none;">
+        <div class="status-banner" id="micro-banner">
+          <div class="icon" id="micro-icon">🟡</div>
+          <div class="text"><h2 id="micro-headline"></h2><p id="micro-summary"></p></div>
+        </div>
+        <div class="quick-section" id="micro-quick-lines"></div>
+        <div class="section-title">Detailed Findings</div>
+        <div id="micro-detail-cards"></div>
+        <div class="btnbar" style="margin-top:14px;">
+          <button class="reset" onclick="resetMicro()">↺ Reset / load different files</button>
+        </div>
       </div>
     </div>
-  </div><!-- /section-micro -->
+  </details>
 
-  <footer>
-    <p class="footer-checks">System CT checks: negative-PV diagnosis · Grid=Load−PV balance (when available) · leg-balance · Production/Load step-change correlation (cross-talk) · flatline/dropout detection · per-day production anomaly · Microinverter checks: time-of-day production gap · electrical (voltage/current) shading signature</p>
-    <p class="footer-disclaimer"><strong>Disclaimer:</strong> Content on this site includes cited references from NEC or official sources, and personal opinion from 13 years of solar industry experience. Human error is possible. Nothing here constitutes legal, engineering, or compliance advice. Always verify with your local AHJ.</p>
-  </footer>
 </div>
-
-<script>
-function showSection(which) {
-  document.getElementById('section-ct').style.display = which === 'ct' ? 'block' : 'none';
-  document.getElementById('section-micro').style.display = which === 'micro' ? 'block' : 'none';
-  document.getElementById('tab-ct').classList.toggle('active', which === 'ct');
-  document.getElementById('tab-micro').classList.toggle('active', which === 'micro');
-}
-</script>
-
-<script>
-// ---------- CSV parsing (shared) ----------
-function parseCSV_shared(text) {
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') { if (text[i+1] === '"') { field += '"'; i++; } else { inQuotes = false; } }
-      else field += c;
-    } else {
-      if (c === '"') inQuotes = true;
-      else if (c === ',') { row.push(field); field = ''; }
-      else if (c === '\n' || c === '\r') {
-        if (c === '\r' && text[i+1] === '\n') i++;
-        row.push(field); field = ''; rows.push(row); row = [];
-      } else field += c;
-    }
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  return rows.filter(r => r.some(c => c.trim() !== ''));
-}
-
-function parseMicroCSV(text) {
-  const table = parseCSV_shared(text);
-  if (table.length < 2) return { error: 'File has no data rows.' };
-  const header = table[0].map(h => h.trim().toLowerCase());
-  const idx = (names) => header.findIndex(h => names.some(n => h.includes(n)));
-  const dtIdx = idx(['datetime','date']);
-  const powerIdx = idx(['average real power','real power','power']);
-  const voltIdx = idx(['dc voltage']);
-  const currIdx = idx(['dc current']);
-  const tempIdx = idx(['temperature']);
-  if (dtIdx === -1 || powerIdx === -1) return { error: 'Could not find DateTime / Power columns — is this a per-microinverter export?' };
-
-  const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
-  const power = [], telemetry = [];
-  for (const r of table.slice(1)) {
-    const t = new Date(r[dtIdx]);
-    if (isNaN(t.getTime())) continue;
-    const tod = t.toISOString().slice(11,16);
-    const p = num(r[powerIdx]);
-    if (p !== null) power.push({ t, tod, value: p });
-    const v = voltIdx !== -1 ? num(r[voltIdx]) : null;
-    const c = currIdx !== -1 ? num(r[currIdx]) : null;
-    const temp = tempIdx !== -1 ? num(r[tempIdx]) : null;
-    if (v !== null || c !== null) telemetry.push({ t, tod, voltage: v, current: c, temp });
-  }
-  if (power.length === 0) return { error: 'No usable power readings found.' };
-  return { power, telemetry };
-}
-
-function groupByTod(power) {
-  const m = new Map();
-  for (const p of power) {
-    if (!m.has(p.tod)) m.set(p.tod, []);
-    m.get(p.tod).push(p.value);
-  }
-  const out = new Map();
-  for (const [tod, vals] of m) out.set(tod, vals.reduce((a,b)=>a+b,0)/vals.length);
-  return out;
-}
-
-function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Inverter B') {
-  const gA = groupByTod(dataA.power), gB = groupByTod(dataB.power);
-  const allTods = [...new Set([...gA.keys(), ...gB.keys()])].sort();
-
-  const table = allTods.map(tod => ({
-    tod, a: gA.get(tod) ?? 0, b: gB.get(tod) ?? 0,
-  })).filter(r => r.a > 5 || r.b > 5);
-
-  if (table.length === 0) return { error: 'No overlapping daylight readings found between the two files.' };
-
-  const totalA = table.reduce((s,r)=>s+r.a, 0), totalB = table.reduce((s,r)=>s+r.b, 0);
-  const [lowerKey, higherKey, lowerLabel, higherLabel, lowerTotal, higherTotal] =
-    totalA <= totalB ? ['a','b',labelA,labelB,totalA,totalB] : ['b','a',labelB,labelA,totalB,totalA];
-  const overallRatio = higherTotal / (lowerTotal || 1);
-
-  let peakTod = table[0].tod, peakVal = -1;
-  table.forEach(r => { const combined = r.a + r.b; if (combined > peakVal) { peakVal = combined; peakTod = r.tod; } });
-
-  const morning = table.filter(r => r.tod < peakTod);
-  const afternoon = table.filter(r => r.tod >= peakTod);
-  const halfRatio = (rows) => {
-    const lo = rows.reduce((s,r)=>s+r[lowerKey],0), hi = rows.reduce((s,r)=>s+r[higherKey],0);
-    return hi / (lo || 0.001);
-  };
-  const morningRatio = halfRatio(morning), afternoonRatio = halfRatio(afternoon);
-  let gapHalf = 'uniform';
-  if (morningRatio > afternoonRatio * 1.5) gapHalf = 'morning';
-  else if (afternoonRatio > morningRatio * 1.5) gapHalf = 'afternoon';
-
-  let electrical = null;
-  const inGapWindow = (tod) => gapHalf === 'morning' ? tod < peakTod : gapHalf === 'afternoon' ? tod >= peakTod : true;
-  const lowerData = lowerKey === 'a' ? dataA : dataB;
-  const higherData = lowerKey === 'a' ? dataB : dataA;
-  const lowerTelem = lowerData.telemetry.filter(t => inGapWindow(t.tod) && t.voltage !== null && t.current !== null);
-  const higherTelem = higherData.telemetry.filter(t => inGapWindow(t.tod) && t.voltage !== null && t.current !== null);
-  if (lowerTelem.length >= 3 && higherTelem.length >= 3) {
-    const avg = (arr,k) => arr.reduce((s,x)=>s+x[k],0)/arr.length;
-    const lv = avg(lowerTelem,'voltage'), lc = avg(lowerTelem,'current');
-    const hv = avg(higherTelem,'voltage'), hc = avg(higherTelem,'current');
-    const currentRatio = lc / (hc || 0.001);
-    const voltageRatio = lv / (hv || 0.001);
-    const shadingSignature = currentRatio < 0.7 && voltageRatio >= 0.95;
-    electrical = { lowerVoltage: lv, lowerCurrent: lc, higherVoltage: hv, higherCurrent: hc, currentRatio, voltageRatio, shadingSignature };
-  }
-
-  let verdict;
-  if (overallRatio < 1.15) verdict = 'no_meaningful_gap';
-  else if (gapHalf !== 'uniform' && electrical?.shadingSignature) verdict = 'likely_shading';
-  else if (gapHalf !== 'uniform' && electrical && !electrical.shadingSignature) verdict = 'directional_gap_not_shading_signature';
-  else if (gapHalf === 'uniform') verdict = 'uniform_gap_check_hardware';
-  else verdict = 'directional_gap_no_telemetry';
-
-  return { verdict, lowerLabel, higherLabel, overallRatio, gapHalf, peakTod, morningRatio, afternoonRatio, electrical, table };
-}
-
-let microFileA = null, microFileB = null;
-document.getElementById('micro-file-a').addEventListener('change', (e) => {
-  if (e.target.files[0]) { microFileA = e.target.files[0]; document.getElementById('micro-filename-a').textContent = microFileA.name; }
-});
-document.getElementById('micro-file-b').addEventListener('change', (e) => {
-  if (e.target.files[0]) { microFileB = e.target.files[0]; document.getElementById('micro-filename-b').textContent = microFileB.name; }
-});
-
-function readFileText(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = (e) => resolve(e.target.result);
-    r.onerror = reject;
-    r.readAsText(file);
-  });
-}
-
-async function runMicroCompare() {
-  const errorBox = document.getElementById('micro-error');
-  const resultsEl = document.getElementById('micro-results');
-  errorBox.style.display = 'none';
-  resultsEl.style.display = 'none';
-
-  if (!microFileA || !microFileB) { errorBox.textContent = 'Choose both files first.'; errorBox.style.display = 'block'; return; }
-
-  try {
-    const [textA, textB] = await Promise.all([readFileText(microFileA), readFileText(microFileB)]);
-    const dataA = parseMicroCSV(textA), dataB = parseMicroCSV(textB);
-    if (dataA.error) { errorBox.textContent = 'Inverter A: ' + dataA.error; errorBox.style.display = 'block'; return; }
-    if (dataB.error) { errorBox.textContent = 'Inverter B: ' + dataB.error; errorBox.style.display = 'block'; return; }
-
-    const result = compareMicroinverters(dataA, dataB, microFileA.name, microFileB.name);
-    if (result.error) { errorBox.textContent = result.error; errorBox.style.display = 'block'; return; }
-    renderMicroResult(result);
-  } catch (err) {
-    errorBox.textContent = 'Could not process these files: ' + err.message;
-    errorBox.style.display = 'block';
-  }
-}
-
-const VERDICT_COPY = {
-  no_meaningful_gap: {
-    icon: '🟢', cls: 'ok', headline: 'No meaningful gap',
-    seeingFn: r => `Total output is within ${((r.overallRatio-1)*100).toFixed(0)}% between the two — well within normal panel-to-panel variation.`,
-    recFn: () => 'None — these two modules are performing comparably.',
-  },
-  likely_shading: {
-    icon: '🟡', cls: 'warn', headline: 'Likely shading, not a hardware fault',
-    seeingFn: r => `${r.lowerLabel} produces ${((1-1/r.overallRatio)*100).toFixed(0)}% less overall, concentrated almost entirely in the ${r.gapHalf} (ratio ${r.gapHalf==='morning'?r.morningRatio.toFixed(1):r.afternoonRatio.toFixed(1)}x there vs ${r.gapHalf==='morning'?r.afternoonRatio.toFixed(1):r.morningRatio.toFixed(1)}x the rest of the day). During that window its current runs at only ${(r.electrical.currentRatio*100).toFixed(0)}% of the comparison module's while its voltage is ${r.electrical.voltageRatio>=1?'higher':'about the same'} — the classic electrical signature of a shaded cell (current collapses, voltage holds up), not a wiring or connection fault.`,
-    recFn: r => `Check for an obstruction (tree, roofline, vent, chimney) to the ${r.gapHalf==='morning'?'east':'west'} of ${r.lowerLabel}'s module. This isn't a CT, wiring, or inverter problem.`,
-  },
-  directional_gap_not_shading_signature: {
-    icon: '🟠', cls: 'warn', headline: 'Directional gap, but not the clean shading signature',
-    seeingFn: r => `${r.lowerLabel} produces ${((1-1/r.overallRatio)*100).toFixed(0)}% less, concentrated in the ${r.gapHalf} — but during that window its voltage is also down (${(r.electrical.voltageRatio*100).toFixed(0)}% of the comparison module), not holding steady or higher like clean shading would show.`,
-    recFn: r => `Worth checking both possibilities: an obstruction to the ${r.gapHalf==='morning'?'east':'west'}, and the DC connection/wiring on ${r.lowerLabel} specifically (the voltage drop doesn't fully match pure shading).`,
-  },
-  directional_gap_no_telemetry: {
-    icon: '🟠', cls: 'warn', headline: 'Directional gap detected (no telemetry to confirm electrically)',
-    seeingFn: r => `${r.lowerLabel} produces ${((1-1/r.overallRatio)*100).toFixed(0)}% less, concentrated in the ${r.gapHalf} (ratio ${r.gapHalf==='morning'?r.morningRatio.toFixed(1):r.afternoonRatio.toFixed(1)}x there vs ${r.gapHalf==='morning'?r.afternoonRatio.toFixed(1):r.morningRatio.toFixed(1)}x otherwise). No DC Voltage/Current columns were available to confirm the electrical signature.`,
-    recFn: r => `Pattern matches shading from the ${r.gapHalf==='morning'?'east':'west'}, but couldn't confirm electrically without voltage/current data. Check for an obstruction first; re-run with a telemetry-inclusive export if you want it confirmed.`,
-  },
-  uniform_gap_check_hardware: {
-    icon: '🔴', cls: 'flag', headline: 'Uniform gap all day — check hardware, not shading',
-    seeingFn: r => `${r.lowerLabel} produces ${((1-1/r.overallRatio)*100).toFixed(0)}% less, fairly evenly across the whole day (morning ratio ${r.morningRatio.toFixed(1)}x, afternoon ratio ${r.afternoonRatio.toFixed(1)}x — no time-of-day concentration).${r.electrical?` Voltage is also down (${(r.electrical.voltageRatio*100).toFixed(0)}% of the comparison module), which isn't the shading signature.`:''}`,
-    recFn: () => `A constant deficit across the whole day, not tied to sun angle, points more toward the module/inverter itself — degraded panel, partial connection issue, or soiling — rather than an external obstruction.`,
-  },
-};
-
-function renderMicroResult(r) {
-  const copy = VERDICT_COPY[r.verdict];
-  document.getElementById('micro-banner').className = 'status-banner ' + copy.cls;
-  document.getElementById('micro-icon').textContent = copy.icon;
-  document.getElementById('micro-headline').textContent = copy.headline;
-  document.getElementById('micro-summary').textContent = `${r.lowerLabel} vs ${r.higherLabel} — overall ratio ${r.overallRatio.toFixed(2)}x`;
-  document.getElementById('micro-seeing').textContent = copy.seeingFn(r);
-  document.getElementById('micro-recommendation').textContent = copy.recFn(r);
-
-  let tableHtml = `<tr><th>Metric</th><th>${r.lowerLabel}</th><th>${r.higherLabel}</th></tr>`;
-  tableHtml += `<tr><td>Total output (sum)</td><td colspan="2">ratio ${r.overallRatio.toFixed(2)}x</td></tr>`;
-  tableHtml += `<tr><td>Morning-half ratio</td><td colspan="2">${r.morningRatio.toFixed(2)}x</td></tr>`;
-  tableHtml += `<tr><td>Afternoon-half ratio</td><td colspan="2">${r.afternoonRatio.toFixed(2)}x</td></tr>`;
-  if (r.electrical) {
-    tableHtml += `<tr><td>DC Current (gap window)</td><td>${r.electrical.lowerCurrent.toFixed(2)}A</td><td>${r.electrical.higherCurrent.toFixed(2)}A</td></tr>`;
-    tableHtml += `<tr><td>DC Voltage (gap window)</td><td>${r.electrical.lowerVoltage.toFixed(1)}V</td><td>${r.electrical.higherVoltage.toFixed(1)}V</td></tr>`;
-  }
-  document.getElementById('micro-table').innerHTML = tableHtml;
-  document.getElementById('micro-results').style.display = 'block';
-}
-
-function resetMicro() {
-  microFileA = null; microFileB = null;
-  document.getElementById('micro-file-a').value = '';
-  document.getElementById('micro-file-b').value = '';
-  document.getElementById('micro-filename-a').textContent = '';
-  document.getElementById('micro-filename-b').textContent = '';
-  document.getElementById('micro-error').style.display = 'none';
-  document.getElementById('micro-results').style.display = 'none';
-}
-</script>
 
 <script>
 // ---------- CSV parsing ----------
@@ -697,18 +257,37 @@ function detectSchema(headerRow) {
     return { kind: 'tesla_derived', pvIdx: solarIdx, gridIdx: siteIdx, battIdx, loadIdx: loadPowerIdx };
   }
 
-  // Look for two L1/L2-style pairs (Produced legs, Consumed legs) by position
-  const legIdxs = [];
-  norm.forEach((h, i) => { if (/^l1\s*\(a\)/.test(h) || /^l2\s*\(b\)/.test(h)) legIdxs.push(i); });
-  if (legIdxs.length >= 4) {
-    return { kind: 'legs_only', prodL1: legIdxs[0], prodL2: legIdxs[1], consL1: legIdxs[2], consL2: legIdxs[3] };
-  }
-  if (legIdxs.length === 2) {
-    // only one pair found - ambiguous, can't tell produced vs consumed reliably
-    return { kind: 'unknown', reason: 'Found only one L1/L2 pair, expected two (Produced + Consumed).' };
+  // Enphase no-Grid-trace exports: find "Produced"/"Consumed" SECTION markers
+  // first, then bucket any L1(A)/L2(B) columns by POSITION relative to those
+  // markers (Produced group vs Consumed group), and identify L1 vs L2 within
+  // each group by actual header text — never by scan order. Confirmed real
+  // exports vary column order both across files AND between the Produced and
+  // Consumed sections of the SAME file, so position-only detection mislabels
+  // which physical leg a finding is actually about.
+  const prodMarkerIdx = norm.findIndex(h => /produced/.test(h));
+  const consMarkerIdx = norm.findIndex(h => /consumed/.test(h));
+
+  if (prodMarkerIdx !== -1 && consMarkerIdx !== -1) {
+    const isL1 = (h) => /^l1\s*\(a\)/.test(h);
+    const isL2 = (h) => /^l2\s*\(b\)/.test(h);
+    let prodL1 = -1, prodL2 = -1, consL1 = -1, consL2 = -1;
+    norm.forEach((h, i) => {
+      const inProdGroup = consMarkerIdx > prodMarkerIdx ? (i > prodMarkerIdx && i < consMarkerIdx) : (i > prodMarkerIdx);
+      const inConsGroup = consMarkerIdx > prodMarkerIdx ? (i > consMarkerIdx) : (i > consMarkerIdx && i < prodMarkerIdx);
+      if (inProdGroup && isL1(h)) prodL1 = i;
+      else if (inProdGroup && isL2(h)) prodL2 = i;
+      else if (inConsGroup && isL1(h)) consL1 = i;
+      else if (inConsGroup && isL2(h)) consL2 = i;
+    });
+    if (prodL1 !== -1 && prodL2 !== -1 && consL1 !== -1 && consL2 !== -1) {
+      return { kind: 'legs_only', prodL1, prodL2, consL1, consL2 };
+    }
+    // No L1/L2 legs found under either marker — whole-system export, single
+    // Produced/Consumed value each, no per-leg breakdown at all.
+    return { kind: 'whole_system', pvIdx: prodMarkerIdx, loadIdx: consMarkerIdx };
   }
 
-  return { kind: 'unknown', reason: 'Could not find PV/Grid/Load columns or Produced/Consumed leg-pair columns.' };
+  return { kind: 'unknown', reason: 'Could not find PV/Grid/Load columns, Produced/Consumed leg-pair columns, or a whole-system Produced/Consumed pair.' };
 }
 
 function rowsFromCSV(text) {
@@ -755,6 +334,16 @@ function rowsFromCSV(text) {
       return { time: timeIdx !== -1 ? r[timeIdx] : '', pv: p1 + p2, grid: null, load: c1 + c2, p1, p2, c1, c2 };
     }).filter(Boolean);
     return { mode: 'legs_only', points };
+  }
+
+  if (schema.kind === 'whole_system') {
+    const points = dataRows.map(r => ({
+      time: timeIdx !== -1 ? r[timeIdx] : '',
+      pv: num(r[schema.pvIdx]),
+      grid: null,
+      load: num(r[schema.loadIdx]),
+    })).filter(p => p.pv !== null && p.load !== null);
+    return { mode: 'whole_system', points };
   }
 }
 
@@ -918,14 +507,28 @@ function runDiagnostic(parsed) {
   const negPV = checkNegativePV(points);
   if (negPV.length > 0) {
     const whileExporting = negPV.some(r => r.diagnosis === 'offset_zero_cal');
+    const isTesla = mode === 'tesla_derived';
+
+    let recommendation, customerNote;
+    if (isTesla) {
+      recommendation = whileExporting
+        ? 'Site is exporting while Solar reads negative — check the Solar CT in Tesla One\'s Device Setup / Meter page: verify it\'s clamped on the correct conductor(s) and measuring the correct phase. Note: Tesla\'s system requires Solar > 0 and Site < 0 to charge from solar — a negative Solar reading will block that even if production is otherwise fine.'
+        : 'Check the "Flip" option on the Solar CT in Tesla One (a negative reading there explicitly means "installed backwards or on the wrong phase" per Tesla\'s own UI). Confirm the CT is on the correct phase before flipping — flipping a CT that\'s actually just on the wrong phase won\'t fix it. Note some installers prefer correcting orientation physically over the electronic flip, since a firmware update can occasionally reset that software setting.';
+      customerNote = 'This is a monitoring/sensor reading issue, not a sign your panels aren\'t producing power. It can also affect whether your battery charges from solar as expected, so it\'s worth scheduling a technician visit to correct the sensor.';
+    } else {
+      recommendation = whileExporting
+        ? 'Site exports while PV reads negative — check the Production CT first: per Enphase\'s CT troubleshooting guidance, the arrow must point toward the load/breaker (away from the array), and the CT must be fully latched around the conductor. Also confirm the PV circuit\'s phase lands on the matching gateway terminal (L1 from the array to L1 at the gateway, etc.) — a phase mismatch can produce this same near-zero-negative signature without a full polarity reversal.'
+        : 'Check whether PV also reads negative at peak output (a full flip) rather than just near zero. If it\'s a full flip, the Production CT arrow is most likely backwards or on the wrong phase — verify against Enphase\'s CT installation guide, or use the reverse-polarity option in the Installer Portal as a same-visit fix without re-touching the physical CT.';
+      customerNote = 'This points to a monitoring sensor reading backward, not your solar panels failing to produce power. Your system is very likely still making and using solar energy normally — this just needs a technician to correct what the monitoring display shows.';
+    }
+
     items.push({
       type: 'issue',
       headline: `PV reads negative at ${negPV.length} point(s)` + ((mode==='load_with_solar'||mode==='tesla_derived') ? (whileExporting ? ' while exporting' : ' while importing') : ''),
-      resolution: whileExporting ? 'check Production CT offset/zero-cal' : 'check Production CT polarity/offset',
+      resolution: whileExporting ? (isTesla ? 'check Solar CT placement/phase' : 'check Production CT arrow direction and phase match') : (isTesla ? 'check Solar CT phase/Flip setting' : 'check Production CT polarity/phase'),
       seeing: `Lowest reading: ${Math.min(...negPV.map(r=>r.pv)).toFixed(0)}W, across ${negPV.length} of ${points.length} points.`,
-      recommendation: whileExporting
-        ? 'Site exports at the same time PV reads negative — physically inconsistent. Check Production CT offset/zero-cal.'
-        : 'Check whether PV also reads negative at peak output (full polarity flip) vs. only near zero (offset/zero-cal).'
+      recommendation,
+      customerNote,
     });
   } else {
     items.push({ type:'confirmed', headline:'No negative-PV artifact detected', resolution:'no action needed',
@@ -938,9 +541,9 @@ function runDiagnostic(parsed) {
     if (flagged.length > 0) {
       const sign = signConsistency(balance.map(b=>b.deviation));
       const ratio = ratioConsistency(balance.map(b=>({expected:b.expected, actual:b.actual})));
-      let rec = 'Check Production CT multiplier/scale and Grid CT config remotely; site visit if unresolved.';
-      if (ratio && ratio.consistent) rec = `Deviation ratio is consistent (≈${ratio.meanRatio.toFixed(2)}) — check the CT ratio/multiplier entered at commissioning.`;
-      else if (sign.consistent) rec = 'Deviation is one-directional but variable in size — more consistent with an untracked second source or CT non-linearity than a fixed multiplier.';
+      let rec = 'Check the Production CT first: per Enphase\'s guidance, confirm it\'s on the correct phase, fully latched around the conductor, and that the configured CT model/rating matches what\'s physically installed. If that checks out, check the Grid/Consumption CT the same way — wire crossing or a loose latch on either can produce this.';
+      if (ratio && ratio.consistent) rec = `Deviation ratio is consistent (≈${ratio.meanRatio.toFixed(2)}) — this points to a fixed scale error, not a wiring fault. Check the CT ratio/multiplier entered at commissioning against the actual CT model installed (e.g. a CT rated for a different max amperage than configured will scale every reading by a constant factor).`;
+      else if (sign.consistent) rec = 'Deviation is one-directional but variable in size — more consistent with an untracked second source or CT non-linearity than a fixed multiplier or a simple wiring fault. A CT arrow/phase check is still worth doing, but don\'t expect it alone to fully explain this pattern.';
       items.push({ type:'issue',
         headline: `Grid doesn't reconcile with Load−PV at ${flagged.length}/${balance.length} point(s)`,
         resolution: 'check Production CT config; escalate if unresolved',
@@ -956,17 +559,45 @@ function runDiagnostic(parsed) {
       seeing:'On this export, Load = Solar + Site (+ Battery) exactly — confirmed by checking the numbers directly. Tesla systems typically have no separate Load CT; Load is calculated from the other three.',
       recommendation:'There is nothing wrong with this — it is how the architecture works. It means a "Load looks off" complaint on a Tesla system should point you at Solar or Site/Battery CTs, not a Load CT that likely doesn\'t exist.' });
   } else {
+    const isWhole = mode === 'whole_system';
     items.push({ type:'info', headline:'No Grid trace in this export', resolution:'balance check unavailable',
-      seeing:'This export has Produced/Consumed by leg only — no separate Grid column.', recommendation:'Not a fault — just a scope limit of this export. Leg-balance and cross-talk checks below still apply.' });
+      seeing: isWhole
+        ? 'This export has whole-system Produced/Consumed totals only — no per-leg breakdown and no separate Grid column.'
+        : 'This export has Produced/Consumed by leg only — no separate Grid column.',
+      recommendation: isWhole
+        ? 'Not a fault — just a scope limit of this export. The cross-talk check below still applies; leg-balance checks don\'t (no legs in this export).'
+        : 'Not a fault — just a scope limit of this export. Leg-balance and cross-talk checks below still apply.' });
   }
+
+  // ---------- Flatline / dropout scan (PV/Produced, Grid/Site, Load/Consumed, Battery) ----------
+  // Computed early so the legs_only per-leg check below can tell whether a
+  // per-leg dropout is its own distinct finding, or just a restatement of a
+  // whole-system outage already being reported here (production AND
+  // consumption totals both flat) — without duplicating the same root cause
+  // as two separate alerts.
+  const flatChecks = [
+    { key: 'pv', label: mode === 'tesla_derived' ? 'Solar' : 'PV/Production', opts: { minHours: 16, toleranceW: 5 } },
+    { key: 'grid', label: mode === 'tesla_derived' ? 'Site' : 'Grid', opts: { minHours: 4, toleranceW: 5, minMagnitudeW: 50 } },
+    { key: 'load', label: mode === 'tesla_derived' ? 'Load (derived)' : 'Load/Consumption', opts: { minHours: 3, toleranceW: 5 } },
+  ];
+  if (mode === 'tesla_derived') flatChecks.push({ key: 'batt', label: 'Battery', opts: { minHours: 4, toleranceW: 5, minMagnitudeW: 50 } });
+
+  const flatResults = flatChecks
+    .map(fc => ({ ...fc, result: checkFlatline(points, fc.key, fc.opts) }))
+    .filter(fc => fc.result !== null);
+  const flaggedFlats = flatResults.filter(fc => fc.result.flagged);
+  const wholeSystemOffline = flaggedFlats.some(f => f.key === 'pv') && flaggedFlats.some(f => f.key === 'load');
 
   if (mode === 'legs_only') {
     const l1p = points.map(p=>p.p1), l2p = points.map(p=>p.p2);
+    const l1c = points.map(p=>p.c1), l2c = points.map(p=>p.c2);
     const rProd = legBalance(l1p, l2p);
 
     // Production: typically a single CT on the combined production conductors,
     // split/doubled across L1+L2 for reporting — so high correlation here just
     // confirms that doubling math, it isn't an independent-CT health signal.
+    // Only flag if it's surprisingly low (would be unusual even under a single-CT
+    // architecture); never frame ordinary mirroring as a finding.
     if (rProd === null) {
       items.push({ type:'info', headline:'Produced L1/L2 leg correlation could not be computed', resolution:'not enough varying data points',
         seeing:'Correlation needs at least 2 points with real variation — this file didn\'t have enough to calculate it.',
@@ -981,20 +612,28 @@ function runDiagnostic(parsed) {
         recommendation:'None needed — mirroring here confirms the reporting math, not CT placement.' });
     }
 
-    // Consumption: genuinely two separate physical CTs, one per leg — check
-    // each leg independently for flatline. A dropped leg-CT can hide inside a
-    // healthy-looking combined Load total if the other leg keeps moving.
+    // Consumption: genuinely two separate physical CTs, one per leg, on
+    // independent circuits — they are NOT expected to correlate with each
+    // other (different loads on each leg). The meaningful failure mode here
+    // is a single dropped leg-CT, which the combined Load flatline check can
+    // mask if the other leg keeps moving normally — so check each leg alone.
     const c1Flat = checkFlatline(points.map(p=>({time:p.time, c1:p.c1})), 'c1', { minHours: 3, toleranceW: 5 });
     const c2Flat = checkFlatline(points.map(p=>({time:p.time, c2:p.c2})), 'c2', { minHours: 3, toleranceW: 5 });
     const consFlags = [];
     if (c1Flat?.flagged) consFlags.push({ leg:'L1(A)', ...c1Flat });
     if (c2Flat?.flagged) consFlags.push({ leg:'L2(B)', ...c2Flat });
-    if (consFlags.length > 0) {
+    if (consFlags.length > 0 && wholeSystemOffline) {
+      // Already covered by the whole-system-offline finding below — don't
+      // duplicate the same root cause as a second, separate alert.
+      items.push({ type:'info', headline:`Per-leg consumption check: both legs flat, consistent with the whole-system outage above`, resolution:'no separate action — see the flatline finding',
+        seeing: 'Both consumption legs independently confirm the same gap already reported as a whole-system dropout — not a separate, leg-specific CT problem.',
+        recommendation: 'None beyond what\'s already noted for the whole-system outage.' });
+    } else if (consFlags.length > 0) {
       items.push({ type:'issue',
         headline: consFlags.map(f=>`Consumption ${f.leg} flat at ~${f.value.toFixed(0)}W for ${f.durationHours!==null?f.durationHours.toFixed(1)+'h':f.count+' pts'}`).join('; '),
         resolution: 'check that specific leg\'s consumption CT',
         seeing: 'Consumption legs are independent circuits and aren\'t expected to track each other — but each one should still show normal variation on its own. A long flat stretch on just one leg can hide inside a healthy-looking combined Load total if the other leg keeps moving.',
-        recommendation: 'Check the CT on the flagged leg specifically — this would not necessarily show up in the combined Load flatline check.' });
+        recommendation: 'Per Enphase\'s meter-error troubleshooting guidance for low/zero consumption readings on a leg: verify that leg\'s CT is fully latched/clamped (not just resting closed), check that the blue and white lead wires land on the correct terminal positions and aren\'t crossed with the other leg\'s pair, and confirm the neutral connection is intact at the panel. This wouldn\'t necessarily show up in the combined Load total if the other leg keeps moving normally.' });
     } else {
       items.push({ type:'confirmed', headline:'No per-leg consumption dropout detected', resolution:'no action needed',
         seeing:'Checked each consumption leg independently (not just the combined total) for abnormally long constant-value stretches.',
@@ -1016,27 +655,17 @@ function runDiagnostic(parsed) {
     }
   }
 
-  // ---------- Flatline / dropout scan (PV/Produced, Grid/Site, Load/Consumed, Battery) ----------
-  const flatChecks = [
-    { key: 'pv', label: mode === 'tesla_derived' ? 'Solar' : 'PV/Production', opts: { minHours: 16, toleranceW: 5 } },
-    { key: 'grid', label: mode === 'tesla_derived' ? 'Site' : 'Grid', opts: { minHours: 4, toleranceW: 5, minMagnitudeW: 50 } },
-    { key: 'load', label: mode === 'tesla_derived' ? 'Load (derived)' : 'Load/Consumption', opts: { minHours: 3, toleranceW: 5 } },
-  ];
-  if (mode === 'tesla_derived') flatChecks.push({ key: 'batt', label: 'Battery', opts: { minHours: 4, toleranceW: 5, minMagnitudeW: 50 } });
-
-  const flatResults = flatChecks
-    .map(fc => ({ ...fc, result: checkFlatline(points, fc.key, fc.opts) }))
-    .filter(fc => fc.result !== null);
-  const flaggedFlats = flatResults.filter(fc => fc.result.flagged);
-
+  // ---------- Flatline / dropout scan results (computed earlier) ----------
   if (flatResults.length > 0) {
     if (flaggedFlats.length > 0) {
       items.push({
         type: 'issue',
         headline: flaggedFlats.map(fc => `${fc.label} flat at ~${fc.result.value.toFixed(0)}W for ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+'h' : fc.result.count+' pts'}`).join('; '),
-        resolution: 'check for comms dropout, disconnected CT, or offline inverter/gateway',
-        seeing: flaggedFlats.map(fc => `${fc.label} held within ${fc.opts.toleranceW}W of ${fc.result.value.toFixed(0)}W for the longest stretch in the data — ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+' hours straight' : fc.result.count+' consecutive samples'}. Real channels essentially never hold this still for this long.`).join(' '),
-        recommendation: 'Check whether this lines up with a known outage/comms gap. If not, verify the CT is still connected and the gateway is reporting — a long, suspiciously flat stretch is the signature of a dropped channel, not just low real-world activity.',
+        resolution: wholeSystemOffline ? 'check gateway power/connectivity — not a single-CT issue' : 'check for comms dropout, disconnected CT, or offline inverter/gateway',
+        seeing: flaggedFlats.map(fc => `${fc.label} held within ${fc.opts.toleranceW}W of ${fc.result.value.toFixed(0)}W for the longest stretch in the data — ${fc.result.durationHours !== null ? fc.result.durationHours.toFixed(1)+' hours straight' : fc.result.count+' consecutive samples'}. Real channels essentially never hold this still for this long.`).join(' ') + (wholeSystemOffline ? ' Both Production AND Consumption are flat at the same time (confirmed on each consumption leg individually too, not just the combined total) — that combination points at the whole gateway/Envoy being offline or unpowered, not a single dropped CT, since production and consumption use separate CTs that wouldn\'t normally fail at the exact same moment.' : ''),
+        recommendation: wholeSystemOffline
+          ? 'Check whether this lines up with a known power outage or internet/comms gap at the site. Since every channel dropped together, start with the gateway itself (power, Wi-Fi/cellular connection) rather than any individual CT.'
+          : 'Check whether this lines up with a known outage/comms gap. If not, verify the CT is still connected and the gateway is reporting — a long, suspiciously flat stretch is the signature of a dropped channel, not just low real-world activity.',
       });
     } else {
       items.push({
@@ -1051,14 +680,47 @@ function runDiagnostic(parsed) {
 
   const dayAnomaly = checkPerDayProductionAnomaly(points, 'pv');
   if (dayAnomaly && dayAnomaly.anomalousDays.length > 0) {
-    items.push({
-      type: 'issue',
-      headline: `${dayAnomaly.anomalousDays.length} day(s) with production far below the dataset's typical peak`,
-      resolution: 'check inverter/gateway logs for those dates',
-      seeing: `Typical daily peak across ${dayAnomaly.totalDays} days is ~${dayAnomaly.median.toFixed(0)}W. ${dayAnomaly.anomalousDays.map(d=>`${d.day} peaked at only ${d.peak.toFixed(0)}W`).join('; ')}.`,
-      recommendation: 'Could be weather (verify against local conditions for that date) or a real outage. Worth a quick remote check of system status/uptime logs for the flagged date(s) before assuming weather.',
-    });
+    // Group into consecutive-calendar-date runs — a multi-day run far below
+    // typical is a much stronger fault signal than an isolated single low
+    // day (which is plausibly just weather), even though both trip the same
+    // per-day threshold. Treat them differently rather than listing all
+    // flagged days as one undifferentiated alert.
+    const sorted = [...dayAnomaly.anomalousDays].sort((a,b)=> a.day < b.day ? -1 : 1);
+    const runs = [];
+    let cur = [sorted[0]];
+    for (let i = 1; i < sorted.length; i++) {
+      const prevDate = new Date(sorted[i-1].day), curDate = new Date(sorted[i].day);
+      const gapDays = Math.round((curDate - prevDate) / 86400000);
+      if (gapDays === 1) cur.push(sorted[i]);
+      else { runs.push(cur); cur = [sorted[i]]; }
+    }
+    runs.push(cur);
+
+    const longRuns = runs.filter(r => r.length >= 3);
+    const isolated = runs.filter(r => r.length < 3).flat();
+
+    if (longRuns.length > 0) {
+      longRuns.forEach(run => {
+        items.push({
+          type: 'issue',
+          headline: `${run.length} consecutive days (${run[0].day} – ${run[run.length-1].day}) with production far below typical`,
+          resolution: 'check inverter/gateway uptime logs for this date range',
+          seeing: `Typical daily peak across ${dayAnomaly.totalDays} days is ~${dayAnomaly.median.toFixed(0)}W. This run dropped to ${Math.min(...run.map(d=>d.peak)).toFixed(0)}–${Math.max(...run.map(d=>d.peak)).toFixed(0)}W for ${run.length} straight days — multiple consecutive days is a much stronger fault signal than a single low day, since weather rarely depresses output this much for this long while neighboring days nearby in the same dataset stay normal.`,
+          recommendation: 'Check inverter/gateway uptime and event logs for this exact date range — this pattern is more consistent with an outage, fault code, or extended shading/coverage (snow, debris) than ordinary weather variation. Confirm with the homeowner whether anything changed around the start date.',
+        });
+      });
+    }
+    if (isolated.length > 0) {
+      items.push({
+        type: 'info',
+        headline: `${isolated.length} isolated day(s) with lower-than-typical production`,
+        resolution: 'likely weather — spot-check only if it recurs',
+        seeing: `Typical daily peak across ${dayAnomaly.totalDays} days is ~${dayAnomaly.median.toFixed(0)}W. ${isolated.map(d=>`${d.day} peaked at only ${d.peak.toFixed(0)}W`).join('; ')}. These are single days, not part of a multi-day run.`,
+        recommendation: 'Most likely cloud cover or rain on those specific dates — isolated single-day dips happen even on healthy systems. Worth a glance at historical weather for those dates if you want to confirm, but not worth a dispatch on its own.',
+      });
+    }
   }
+
 
   const issues = items.filter(i=>i.type==='issue');
   return {
@@ -1067,7 +729,6 @@ function runDiagnostic(parsed) {
     items
   };
 }
-
 </script>
 <script>
 const fileInput = document.getElementById('file-input');
@@ -1076,7 +737,6 @@ const errorBox = document.getElementById('error');
 const resultsEl = document.getElementById('results');
 
 fileInput.addEventListener('change', (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); });
-
 uploadCard.addEventListener('dragover', (e) => { e.preventDefault(); uploadCard.classList.add('dragover'); });
 uploadCard.addEventListener('dragleave', () => uploadCard.classList.remove('dragover'));
 uploadCard.addEventListener('drop', (e) => {
@@ -1089,7 +749,6 @@ function handleFile(file) {
   document.getElementById('filename').textContent = file.name;
   errorBox.style.display = 'none';
   resultsEl.style.display = 'none';
-
   const reader = new FileReader();
   reader.onload = (ev) => {
     try {
@@ -1106,14 +765,11 @@ function handleFile(file) {
   reader.readAsText(file);
 }
 
-function showError(msg) {
-  errorBox.textContent = msg;
-  errorBox.style.display = 'block';
-}
+function showError(msg) { errorBox.textContent = msg; errorBox.style.display = 'block'; }
 
 function renderReport(report, parsed, filename) {
   document.getElementById('meta-filename').textContent = filename;
-  document.getElementById('meta-mode').textContent = parsed.mode === 'load_with_solar' ? 'PV / Grid / Load' : 'Produced / Consumed by leg (no Grid trace)';
+  document.getElementById('meta-mode').textContent = parsed.mode === 'load_with_solar' ? 'PV / Grid / Load' : parsed.mode === 'tesla_derived' ? 'Solar / Site (derived Load)' : 'Produced / Consumed by leg (no Grid trace)';
   document.getElementById('meta-points').textContent = parsed.points.length;
 
   const BANNER = {
@@ -1145,6 +801,7 @@ function renderReport(report, parsed, filename) {
       <p>${it.seeing}</p>
       <div class="label">Recommendation</div>
       <p>${it.recommendation}</p>
+      ${it.customerNote ? `<div class="customer-note"><div class="customer-note-label">💬 Customer-facing summary</div><p>${it.customerNote}</p></div>` : ''}
     </div>`).join('');
 
   resultsEl.style.display = 'block';
@@ -1156,6 +813,306 @@ function resetTool() {
   errorBox.style.display = 'none';
   resultsEl.style.display = 'none';
 }
+</script>
+<script>
+// ---------- CSV parsing (shared logic) ----------
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') { if (text[i+1] === '"') { field += '"'; i++; } else { inQuotes = false; } }
+      else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i+1] === '\n') i++;
+        row.push(field); field = ''; rows.push(row); row = [];
+      } else field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ''));
+}
+
+// NOTE: this tool reads a single microinverter's own internal telemetry
+// (its own DC and AC sensors, reporting on its own module). There is no CT
+// anywhere in this picture — CTs belong to system-level Grid/Load metering,
+// a different tool entirely. Don't use CT language in this section.
+function parseMicroCSV(text) {
+  const table = parseCSV(text);
+  if (table.length < 2) return { error: 'File has no data rows.' };
+  const header = table[0].map(h => h.trim().toLowerCase());
+  const idx = (names) => header.findIndex(h => names.some(n => h.includes(n)));
+  const dtIdx = idx(['datetime','date']);
+  const powerIdx = idx(['average real power','real power','power']);
+  const dcVoltIdx = idx(['dc voltage']);
+  const dcCurrIdx = idx(['dc current']);
+  const acVoltIdx = idx(['ac voltage']);
+  const acFreqIdx = idx(['ac frequency','frequency']);
+  const tempIdx = idx(['temperature']);
+  if (dtIdx === -1 || powerIdx === -1) return { error: 'Could not find DateTime / Power columns — is this a per-microinverter export?' };
+
+  const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+  const power = [], telemetry = [];
+  for (const r of table.slice(1)) {
+    const t = new Date(r[dtIdx]);
+    if (isNaN(t.getTime())) continue;
+    const tod = t.toISOString().slice(11,16); // HH:MM in UTC-of-string (consistent relative ordering, which is all we need)
+    const p = num(r[powerIdx]);
+    if (p !== null) power.push({ t, tod, value: p });
+    const dcV = dcVoltIdx !== -1 ? num(r[dcVoltIdx]) : null;
+    const dcC = dcCurrIdx !== -1 ? num(r[dcCurrIdx]) : null;
+    const acV = acVoltIdx !== -1 ? num(r[acVoltIdx]) : null;
+    const acF = acFreqIdx !== -1 ? num(r[acFreqIdx]) : null;
+    const temp = tempIdx !== -1 ? num(r[tempIdx]) : null;
+    if (dcV !== null || dcC !== null || acV !== null) {
+      telemetry.push({ t, tod, dcVoltage: dcV, dcCurrent: dcC, acVoltage: acV, acFrequency: acF, temp });
+    }
+  }
+  if (power.length === 0) return { error: 'No usable power readings found.' };
+  return { power, telemetry };
+}
+
+// ---------- Comparison logic ----------
+function groupByTod(power) {
+  const m = new Map();
+  for (const p of power) {
+    if (!m.has(p.tod)) m.set(p.tod, []);
+    m.get(p.tod).push(p.value);
+  }
+  const out = new Map();
+  for (const [tod, vals] of m) out.set(tod, vals.reduce((a,b)=>a+b,0)/vals.length);
+  return out;
+}
+
+const avg = (arr,k) => arr.length ? arr.reduce((s,x)=>s+x[k],0)/arr.length : null;
+
+function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Inverter B') {
+  const gA = groupByTod(dataA.power), gB = groupByTod(dataB.power);
+  const allTods = [...new Set([...gA.keys(), ...gB.keys()])].sort();
+
+  const table = allTods.map(tod => ({
+    tod, a: gA.get(tod) ?? 0, b: gB.get(tod) ?? 0,
+  })).filter(r => r.a > 5 || r.b > 5); // daylight-only rows
+
+  if (table.length === 0) return { error: 'No overlapping daylight readings found between the two files.' };
+
+  const totalA = table.reduce((s,r)=>s+r.a, 0), totalB = table.reduce((s,r)=>s+r.b, 0);
+  const [lowerKey, lowerLabel, higherLabel, lowerTotal, higherTotal] =
+    totalA <= totalB ? ['a',labelA,labelB,totalA,totalB] : ['b',labelB,labelA,totalB,totalA];
+  const overallRatio = higherTotal / (lowerTotal || 1);
+
+  // empirical solar-noon proxy: time-of-day where combined output peaks
+  let peakTod = table[0].tod, peakVal = -1;
+  table.forEach(r => { const combined = r.a + r.b; if (combined > peakVal) { peakVal = combined; peakTod = r.tod; } });
+
+  const morning = table.filter(r => r.tod < peakTod);
+  const afternoon = table.filter(r => r.tod >= peakTod);
+  const halfRatio = (rows, lk) => {
+    const hk = lk === 'a' ? 'b' : 'a';
+    const lo = rows.reduce((s,r)=>s+r[lk],0), hi = rows.reduce((s,r)=>s+r[hk],0);
+    return hi / (lo || 0.001);
+  };
+  const morningRatio = halfRatio(morning, lowerKey), afternoonRatio = halfRatio(afternoon, lowerKey);
+  let gapHalf = 'uniform';
+  if (morningRatio > afternoonRatio * 1.5) gapHalf = 'morning';
+  else if (afternoonRatio > morningRatio * 1.5) gapHalf = 'afternoon';
+
+  const meaningfulGap = overallRatio >= 1.15;
+
+  const findings = [];
+
+  if (!meaningfulGap) {
+    findings.push({ type:'confirmed', headline:'No meaningful production gap', resolution:'no action needed',
+      seeing:`Total output is within ${((overallRatio-1)*100).toFixed(0)}% between the two — normal module-to-module variation.`,
+      recommendation:'None — these two modules are performing comparably.' });
+    return { lowerLabel, higherLabel, overallRatio, gapHalf, peakTod, morningRatio, afternoonRatio, findings, table };
+  }
+
+  // Telemetry within whichever half has the bigger gap — use a time-of-day
+  // RANGE (not exact match), since the telemetry stream is offset by several
+  // minutes from the power stream's own timestamps.
+  const inGapWindow = (tod) => gapHalf === 'morning' ? tod < peakTod : gapHalf === 'afternoon' ? tod >= peakTod : true;
+  const lowerData = lowerKey === 'a' ? dataA : dataB;
+  const higherData = lowerKey === 'a' ? dataB : dataA;
+  const lowerTelem = lowerData.telemetry.filter(t => inGapWindow(t.tod));
+  const higherTelem = higherData.telemetry.filter(t => inGapWindow(t.tod));
+
+  const lowerDC = lowerTelem.filter(t => t.dcVoltage !== null && t.dcCurrent !== null);
+  const higherDC = higherTelem.filter(t => t.dcVoltage !== null && t.dcCurrent !== null);
+  const lowerAC = lowerTelem.filter(t => t.acVoltage !== null);
+  const higherAC = higherTelem.filter(t => t.acVoltage !== null);
+
+  let dc = null, ac = null;
+  const gapPct = ((1 - 1/overallRatio) * 100).toFixed(0);
+  const directionWord = gapHalf === 'morning' ? 'east' : gapHalf === 'afternoon' ? 'west' : null;
+
+  // ---- DC side: is amperage normal, is voltage the same? ----
+  if (lowerDC.length >= 3 && higherDC.length >= 3) {
+    const lc = avg(lowerDC,'dcCurrent'), hc = avg(higherDC,'dcCurrent');
+    const lv = avg(lowerDC,'dcVoltage'), hv = avg(higherDC,'dcVoltage');
+    const currentRatio = lc / (hc || 0.001);
+    const voltageRatio = lv / (hv || 0.001);
+    dc = { lowerCurrent: lc, higherCurrent: hc, lowerVoltage: lv, higherVoltage: hv, currentRatio, voltageRatio };
+
+    if (currentRatio < 0.7 && voltageRatio >= 0.95) {
+      // amperage down, voltage steady-or-higher = classic shaded-cell signature
+      if (gapHalf !== 'uniform') {
+        findings.push({ type:'issue', headline:`DC side: shading signature, concentrated in the ${gapHalf}`, resolution:`check for an obstruction to the ${directionWord}`,
+          seeing:`${lowerLabel} produces ${gapPct}% less overall. In the ${gapHalf}, its DC amperage runs at only ${(currentRatio*100).toFixed(0)}% of ${higherLabel}'s while DC voltage is ${voltageRatio>=1?'higher':'about the same'} — current collapses, voltage holds up, which is the electrical fingerprint of a shaded cell, not a connection problem.`,
+          recommendation:`Look for an obstruction (tree, roofline, vent, chimney) to the ${directionWord} of ${lowerLabel}'s module. The module and its DC connection are reading normally; this points to something blocking light, not equipment.` });
+      } else {
+        findings.push({ type:'issue', headline:'DC side: low amperage / steady voltage, but uniform across the day', resolution:'check for soiling, debris, or a fixed partial obstruction',
+          seeing:`${lowerLabel}'s DC amperage runs low relative to ${higherLabel} (${(currentRatio*100).toFixed(0)}%) with voltage holding steady — the shaded-cell signature — but this holds fairly evenly all day rather than concentrating in one half. Transient sun-angle shading is usually time-of-day specific; a constant deficit suggests something that blocks light all day regardless of sun position.`,
+          recommendation:'Check for soiling, debris, bird droppings, or a fixed object directly over part of the module — something present at every sun angle, not just a low-angle obstruction.' });
+      }
+    } else if (currentRatio < 0.7 && voltageRatio < 0.95) {
+      // amperage AND voltage both down = panel/connection issue, not shading
+      findings.push({ type:'issue', headline:'DC side: amperage and voltage both down', resolution:`check the DC connection and module on ${lowerLabel}`,
+        seeing:`${lowerLabel} runs low on both DC current (${(currentRatio*100).toFixed(0)}% of ${higherLabel}) and DC voltage (${(voltageRatio*100).toFixed(0)}%) in the gap window. Shading drops current while voltage holds up; here voltage drops too, which points at the panel-to-inverter connection or the module itself rather than an external obstruction.`,
+        recommendation:`Check the DC connector/MC4 connection between ${lowerLabel} and its module, and inspect the module for visible degradation (microcracks, delamination, hot spots). This doesn't look like shading.` });
+    } else {
+      findings.push({ type:'confirmed', headline:'DC side: amperage and voltage both normal', resolution:'no DC-side issue found',
+        seeing:`${lowerLabel}'s DC current (${(currentRatio*100).toFixed(0)}% of ${higherLabel}) and voltage (${(voltageRatio*100).toFixed(0)}%) are both in line with the comparison module during the gap window.`,
+        recommendation:'None — the panel and its DC connection look healthy. If a production gap still shows up overall, look at the AC side and the communication path rather than the panel.' });
+    }
+  }
+
+  // ---- AC side: is voltage the same? (grid-locked, so should be close) ----
+  if (lowerAC.length >= 3 && higherAC.length >= 3) {
+    const lv = avg(lowerAC,'acVoltage'), hv = avg(higherAC,'acVoltage');
+    const acVoltageRatio = lv / (hv || 0.001);
+    ac = { lowerVoltage: lv, higherVoltage: hv, acVoltageRatio };
+
+    if (acVoltageRatio < 0.97) {
+      findings.push({ type:'issue', headline:`AC side: ${lowerLabel} reads ${((1-acVoltageRatio)*100).toFixed(1)}% lower AC voltage`, resolution:`check ${lowerLabel}'s AC branch wiring`,
+        seeing:`Both inverters sit on the same grid, so AC voltage should track closely between them (it's set by the utility, not the module). ${lowerLabel} averages ${lv.toFixed(1)}V vs ${higherLabel}'s ${hv.toFixed(1)}V in the gap window — more than normal grid fluctuation accounts for.`,
+        recommendation:`Check the AC branch circuit feeding ${lowerLabel} specifically — a loose connection, a long/undersized run, or a bad splice can cause a voltage drop at that inverter even though the panel and grid are both fine. This is independent of whatever the DC side shows.` });
+    } else {
+      findings.push({ type:'confirmed', headline:'AC side: voltage matches between modules', resolution:'no branch-wiring issue found',
+        seeing:`${lowerLabel} (${lv.toFixed(1)}V) and ${higherLabel} (${hv.toFixed(1)}V) read essentially the same AC voltage, as expected for two inverters on the same grid.`,
+        recommendation:'None — no sign of a voltage drop on this branch.' });
+    }
+  }
+
+  // ---- Residual: gap exists but neither DC nor AC explains it ----
+  const dcLooksNormal = dc && dc.currentRatio >= 0.7;
+  const acLooksNormal = !ac || ac.acVoltageRatio >= 0.97; // if AC unavailable, don't block this on AC alone
+  if (meaningfulGap && dcLooksNormal && acLooksNormal) {
+    findings.push({ type:'issue', headline:'Production gap with no DC or AC electrical explanation', resolution:'consider a power-line communication issue, not a production fault',
+      seeing:`${lowerLabel} reports ${gapPct}% less total output, but its DC amperage/voltage and AC voltage both read normally during the gap window. Enphase microinverters report back to the gateway over power-line carrier — a signal superimposed on the same AC conductors carrying power, not a separate wire. A weak or noisy carrier signal (e.g. ${lowerLabel} sitting farther down a long branch circuit, or near a noise source) can cause reporting gaps or undercounted readings without the module's actual electrical output being abnormal.`,
+      recommendation:`If the panel and wiring check out physically, look at ${lowerLabel}'s position on the branch circuit (distance from the gateway, anything else sharing that circuit) before assuming a hardware fault. This is a communication-signal hypothesis, not a confirmed cause — worth ruling out the physical causes above first.` });
+  }
+
+  if (!dc && !ac) {
+    findings.push({ type:'info', headline:'Directional gap detected, but no DC/AC telemetry to confirm a cause', resolution:'re-run with a telemetry-inclusive export',
+      seeing:`${lowerLabel} produces ${gapPct}% less, concentrated in the ${gapHalf === 'uniform' ? 'whole day evenly' : gapHalf}. No DC Voltage/Current or AC Voltage columns were available to narrow down why.`,
+      recommendation: gapHalf !== 'uniform' ? `Pattern is consistent with shading from the ${directionWord}, but that's a guess without DC/AC data to confirm it.` : 'No time-of-day pattern to go on either — telemetry data would help a lot here.' });
+  }
+
+  return { lowerLabel, higherLabel, overallRatio, gapHalf, peakTod, morningRatio, afternoonRatio, dc, ac, findings, table };
+}
+
+
+let microFileA = null, microFileB = null;
+document.getElementById('micro-file-a').addEventListener('change', (e) => {
+  if (e.target.files[0]) { microFileA = e.target.files[0]; document.getElementById('micro-filename-a').textContent = microFileA.name; }
+});
+document.getElementById('micro-file-b').addEventListener('change', (e) => {
+  if (e.target.files[0]) { microFileB = e.target.files[0]; document.getElementById('micro-filename-b').textContent = microFileB.name; }
+});
+
+function readFileText(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = (e) => resolve(e.target.result);
+    r.onerror = reject;
+    r.readAsText(file);
+  });
+}
+
+async function runMicroCompare() {
+  const errorBox = document.getElementById('micro-error');
+  const resultsEl = document.getElementById('micro-results');
+  errorBox.style.display = 'none';
+  resultsEl.style.display = 'none';
+
+  if (!microFileA || !microFileB) { errorBox.textContent = 'Choose both files first.'; errorBox.style.display = 'block'; return; }
+
+  try {
+    const [textA, textB] = await Promise.all([readFileText(microFileA), readFileText(microFileB)]);
+    const dataA = parseMicroCSV(textA), dataB = parseMicroCSV(textB);
+    if (dataA.error) { errorBox.textContent = 'Inverter A: ' + dataA.error; errorBox.style.display = 'block'; return; }
+    if (dataB.error) { errorBox.textContent = 'Inverter B: ' + dataB.error; errorBox.style.display = 'block'; return; }
+
+    const result = compareMicroinverters(dataA, dataB, microFileA.name, microFileB.name);
+    if (result.error) { errorBox.textContent = result.error; errorBox.style.display = 'block'; return; }
+    renderMicroResult(result);
+  } catch (err) {
+    errorBox.textContent = 'Could not process these files: ' + err.message;
+    errorBox.style.display = 'block';
+  }
+}
+
+// Renders the findings list using the same locked two-tier pattern (banner +
+// quick lines + detail cards) as the System CT Review section, so the whole
+// page reads consistently regardless of which tab you're on.
+function renderMicroResult(r) {
+  const findings = r.findings || [];
+  const hasIssue = findings.some(f => f.type === 'issue');
+  const hasInfoOnly = !hasIssue && findings.some(f => f.type === 'info');
+
+  const BANNER = hasIssue
+    ? { cls:'flag', icon:'🔴', headline:'ISSUE(S) FOUND' }
+    : hasInfoOnly
+      ? { cls:'warn', icon:'🟡', headline:'INCONCLUSIVE' }
+      : { cls:'ok', icon:'🟢', headline:'GOOD' };
+
+  const issueCount = findings.filter(f=>f.type==='issue').length;
+  const summary = `${r.lowerLabel} vs ${r.higherLabel} — overall ratio ${r.overallRatio.toFixed(2)}x` +
+    (issueCount > 0 ? ` — ${issueCount} issue(s) found` : '');
+
+  document.getElementById('micro-banner').className = 'status-banner ' + BANNER.cls;
+  document.getElementById('micro-icon').textContent = BANNER.icon;
+  document.getElementById('micro-headline').textContent = BANNER.headline;
+  document.getElementById('micro-summary').textContent = summary;
+
+  const bulletFor = { issue: '✗', confirmed: '✓', info: 'ⓘ' };
+  const tagFor = { issue: 'Issue', confirmed: 'Confirmed normal', info: 'Info' };
+
+  document.getElementById('micro-quick-lines').innerHTML = findings.map((f, i) => `
+    <a class="quick-line" href="#micro-item-${i}">
+      <span class="bullet ${f.type}">${bulletFor[f.type]}</span>
+      <span class="line-text"><b>${f.headline}</b> → ${f.resolution}</span>
+      <span class="jump">Details ↓</span>
+    </a>`).join('');
+
+  document.getElementById('micro-detail-cards').innerHTML = findings.map((f, i) => `
+    <div class="detail-card ${f.type}" id="micro-item-${i}">
+      <h3><span class="tag">${tagFor[f.type]}</span> ${f.headline}</h3>
+      <div class="label">What I'm seeing</div>
+      <p>${f.seeing}</p>
+      <div class="label">Recommendation</div>
+      <p>${f.recommendation}</p>
+    </div>`).join('');
+
+  document.getElementById('micro-results').style.display = 'block';
+}
+
+function resetMicro() {
+  microFileA = null; microFileB = null;
+  document.getElementById('micro-file-a').value = '';
+  document.getElementById('micro-file-b').value = '';
+  document.getElementById('micro-filename-a').textContent = '';
+  document.getElementById('micro-filename-b').textContent = '';
+  document.getElementById('micro-error').style.display = 'none';
+  document.getElementById('micro-results').style.display = 'none';
+}
+
 </script>
 </body>
 </html>
