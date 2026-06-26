@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PV CT Diagnostic — Data Review</title>
+<title>Lynx — PV CT Data Reviewer</title>
 <style>
   :root{
     /* Dark / orange-accent theme — directional shift toward the internal
@@ -38,7 +38,10 @@
     padding:3px 9px; margin-bottom:10px;
   }
   header{margin-bottom:18px;}
-  header h1{margin:0 0 4px; font-size:21px; color:var(--ink);}
+  header h1{margin:0; font-size:24px; color:var(--ink); letter-spacing:.3px;}
+  .title-row{display:flex; align-items:baseline; gap:8px; margin-bottom:4px;}
+  .lynx-eye{flex-shrink:0; align-self:center;}
+  .title-subtitle{font-size:13px; color:var(--muted); font-weight:500;}
   header p{margin:0; color:var(--muted); font-size:13px; max-width:560px;}
 
   .upload-card{
@@ -135,7 +138,16 @@
 
   <header>
     <span class="eyebrow">Diagnostic Tool</span>
-    <h1>PV CT Data Reviewer</h1>
+    <div class="title-row">
+      <svg class="lynx-eye" width="34" height="24" viewBox="0 0 80 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M3,28 Q26,3 40,3 Q54,3 77,28 Q54,53 40,53 Q26,53 3,28 Z" fill="none" stroke="#f5821f" stroke-width="3.5" stroke-linejoin="round"/>
+        <circle cx="40" cy="28" r="14.5" fill="#f5821f"/>
+        <ellipse cx="40" cy="28" rx="3.6" ry="12.5" fill="#14161a"/>
+        <circle cx="34.5" cy="21.5" r="2.6" fill="#ffd9a8" opacity="0.85"/>
+      </svg>
+      <h1>Lynx</h1>
+      <span class="title-subtitle">PV CT Data Reviewer</span>
+    </div>
     <p>Drop in a CSV export for an instant diagnostic — negative-PV artifacts, Grid/Load balance, leg correlation, cross-talk detection. Runs entirely in your browser. No upload, no server, no AI call.</p>
   </header>
 
@@ -1177,6 +1189,27 @@ function parseCSV(text) {
   return rows.filter(r => r.some(c => c.trim() !== ''));
 }
 
+// Mirrors diagnostics.js's parseTimeSafe — GraphList-style "Mon D, YYYY
+// (HH:MM)" timestamps silently parse to midnight under native Date(), which
+// would corrupt every time-of-day calculation in this file the same way it
+// did in diagnostics.js before that was caught and fixed. Real microinverter
+// exports seen so far use plain ISO timestamps (where native Date() is
+// fine), but this format isn't guaranteed, so parse defensively rather than
+// rely on that holding.
+function parseTimeSafe(str) {
+  if (!str) return null;
+  const m = str.match(/^([A-Za-z]{3}\s+\d{1,2},\s*\d{4})\s*\((\d{1,2}):(\d{2})\)/);
+  if (m) {
+    const datePart = new Date(m[1]);
+    if (!isNaN(datePart.getTime())) {
+      datePart.setHours(parseInt(m[2],10), parseInt(m[3],10), 0, 0);
+      return datePart;
+    }
+  }
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 // NOTE: this tool reads a single microinverter's own internal telemetry
 // (its own DC and AC sensors, reporting on its own module). There is no CT
 // anywhere in this picture — CTs belong to system-level Grid/Load metering,
@@ -1198,8 +1231,8 @@ function parseMicroCSV(text) {
   const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
   const power = [], telemetry = [];
   for (const r of table.slice(1)) {
-    const t = new Date(r[dtIdx]);
-    if (isNaN(t.getTime())) continue;
+    const t = parseTimeSafe(r[dtIdx]);
+    if (!t) continue;
     const tod = t.toISOString().slice(11,16); // HH:MM in UTC-of-string (consistent relative ordering, which is all we need)
     const p = num(r[powerIdx]);
     if (p !== null) power.push({ t, tod, value: p });
@@ -1229,6 +1262,37 @@ function groupByTod(power) {
 }
 
 const avg = (arr,k) => arr.length ? arr.reduce((s,x)=>s+x[k],0)/arr.length : null;
+
+/** Computes each calendar day's own production ratio separately and
+ * returns whichever day is worst. groupByTod pools every day's readings at
+ * the same time-of-day into one averaged curve — useful for the main
+ * comparison, but it means a real issue confined to a single day (a parked
+ * truck, temporary scaffolding, foliage trimmed partway through the export
+ * window) can get smoothed into a healthy-looking pooled average across
+ * the other, unaffected days. Same risk shape as the cross-talk dilution
+ * bug found on the CT side, applied to time-of-day pooling instead of a
+ * single whole-file correlation figure. */
+function worstDayRatio(powerA, powerB) {
+  const dayKey = (t) => `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  const byDay = new Map();
+  for (const p of powerA) {
+    const k = dayKey(p.t);
+    if (!byDay.has(k)) byDay.set(k, { a: 0, b: 0 });
+    byDay.get(k).a += p.value;
+  }
+  for (const p of powerB) {
+    const k = dayKey(p.t);
+    if (!byDay.has(k)) byDay.set(k, { a: 0, b: 0 });
+    byDay.get(k).b += p.value;
+  }
+  let worst = null;
+  for (const [day, { a, b }] of byDay) {
+    if (a < 50 && b < 50) continue; // skip days with essentially no production from either — not informative
+    const ratio = Math.max(a, b) / (Math.min(a, b) || 0.001);
+    if (!worst || ratio > worst.ratio) worst = { day, ratio, a, b };
+  }
+  return (byDay.size >= 2) ? worst : null; // a single-day file has nothing to compare against
+}
 
 function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Inverter B') {
   const gA = groupByTod(dataA.power), gB = groupByTod(dataB.power);
@@ -1262,13 +1326,24 @@ function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Invert
   else if (afternoonRatio > morningRatio * 1.5) gapHalf = 'afternoon';
 
   const meaningfulGap = overallRatio >= 1.15;
+  const worstDay = worstDayRatio(dataA.power, dataB.power);
+  const dayHidesIssue = worstDay && worstDay.ratio >= 1.3 && worstDay.ratio > overallRatio + 0.3;
 
   const findings = [];
 
   if (!meaningfulGap) {
-    findings.push({ type:'confirmed', headline:'No meaningful production gap', resolution:'no action needed',
-      seeing:`Total output is within ${((overallRatio-1)*100).toFixed(0)}% between the two — normal module-to-module variation.`,
-      recommendation:'None — these two modules are performing comparably.' });
+    if (dayHidesIssue) {
+      const dayLowerLabel = worstDay.a <= worstDay.b ? labelA : labelB;
+      findings.push({ type:'issue', headline:`Production gap on ${worstDay.day} alone (${worstDay.ratio.toFixed(2)}x), hidden by averaging across the whole export`,
+        resolution: `check ${dayLowerLabel} specifically on ${worstDay.day}`,
+        seeing: `Averaged across every day in this export, the two modules look comparable (${overallRatio.toFixed(2)}x overall) — but ${worstDay.day} alone shows a ${worstDay.ratio.toFixed(2)}x gap. The other days in this export are healthy enough to smooth that one day into a fine-looking average, the same way a real issue can hide inside a pooled time-of-day curve.`,
+        recommendation: `Pull just ${worstDay.day}'s telemetry on its own (DC voltage/current, AC voltage) rather than relying on the whole-export comparison — a single bad day won't show up clearly in a multi-day average. If it recurs on other days going forward, that's worth tracking as an ongoing pattern rather than a one-off.`,
+        plainSummary: `One specific day showed a real production gap between the two modules, but it's not visible when looking at the export as a whole — averaging across multiple days can hide a single bad day.` });
+    } else {
+      findings.push({ type:'confirmed', headline:'No meaningful production gap', resolution:'no action needed',
+        seeing:`Total output is within ${((overallRatio-1)*100).toFixed(0)}% between the two — normal module-to-module variation.`,
+        recommendation:'None — these two modules are performing comparably.' });
+    }
     return { lowerLabel, higherLabel, overallRatio, gapHalf, peakTod, morningRatio, afternoonRatio, findings, table };
   }
 
@@ -1286,7 +1361,7 @@ function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Invert
   const lowerAC = lowerTelem.filter(t => t.acVoltage !== null);
   const higherAC = higherTelem.filter(t => t.acVoltage !== null);
 
-  let dc = null, ac = null;
+  let dc = null, ac = null, dcExplainsGap = false;
   const gapPct = ((1 - 1/overallRatio) * 100).toFixed(0);
   const directionWord = gapHalf === 'morning' ? 'east' : gapHalf === 'afternoon' ? 'west' : null;
 
@@ -1297,6 +1372,7 @@ function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Invert
     const currentRatio = lc / (hc || 0.001);
     const voltageRatio = lv / (hv || 0.001);
     dc = { lowerCurrent: lc, higherCurrent: hc, lowerVoltage: lv, higherVoltage: hv, currentRatio, voltageRatio };
+    dcExplainsGap = (currentRatio < 0.7) || (voltageRatio < 0.85 && (currentRatio - voltageRatio) > 0.15);
 
     if (currentRatio < 0.7 && voltageRatio >= 0.95) {
       // amperage down, voltage steady-or-higher = classic shaded-cell signature
@@ -1308,6 +1384,32 @@ function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Invert
         findings.push({ type:'issue', headline:'DC side: low amperage / steady voltage, but uniform across the day', resolution:'check for soiling, debris, or a fixed partial obstruction',
           seeing:`${lowerLabel}'s DC amperage runs low relative to ${higherLabel} (${(currentRatio*100).toFixed(0)}%) with voltage holding steady — the shaded-cell signature — but this holds fairly evenly all day rather than concentrating in one half. Transient sun-angle shading is usually time-of-day specific; a constant deficit suggests something that blocks light all day regardless of sun position.`,
           recommendation:'Check for soiling, debris, bird droppings, or a fixed object directly over part of the module — something present at every sun angle, not just a low-angle obstruction.' });
+      }
+    } else if (voltageRatio < 0.85 && (currentRatio - voltageRatio) > 0.15) {
+      // Voltage down substantially while current stays comparatively
+      // preserved — the inverse of the shading signature above, and the
+      // electrical fingerprint of a bypass diode routing around part of
+      // the panel's cell string. A panel with the common 3-diode design
+      // drops to ~67% of normal voltage if one diode activates, ~33% if
+      // two do; current is preserved because the diode reroutes around the
+      // bad segment rather than throttling the whole string the way
+      // uniform shading does. Distinguishing intermittent (time-of-day
+      // concentrated, a real moving shadow) from persistent (constant all
+      // day, a shorted diode) matters for the recommendation: one is a
+      // tree-trimming conversation, the other is a module/diode replacement.
+      const closeToOneDiode = Math.abs(voltageRatio - 0.667) < 0.12;
+      const closeToTwoDiodes = Math.abs(voltageRatio - 0.333) < 0.12;
+      const fractionNote = closeToOneDiode ? ' — close to the ~67% expected if one bypass diode is active.'
+        : closeToTwoDiodes ? ' — close to the ~33% expected if two bypass diodes are active.'
+        : '';
+      if (gapHalf !== 'uniform') {
+        findings.push({ type:'issue', headline:`DC side: voltage drop with preserved current, concentrated in the ${gapHalf}`, resolution:`check for a narrow obstruction to the ${directionWord}`,
+          seeing:`${lowerLabel}'s DC voltage runs at only ${(voltageRatio*100).toFixed(0)}% of ${higherLabel}'s in the ${gapHalf}, while DC current stays much closer to normal (${(currentRatio*100).toFixed(0)}%)${fractionNote} This is the inverse of the shading signature above — voltage collapsing while current holds up points to a bypass diode routing around part of the cell string, which happens with partial/asymmetric shading (a narrow obstruction covering only part of one panel or string), not broad cloud cover. Concentrated in the ${gapHalf}, this tracks with the sun's position — consistent with a real, moving shadow rather than a hardware fault.`,
+          recommendation:`Look for a narrow obstruction to the ${directionWord} — a vent pipe, antenna, guy-wire, or similar that would shade only part of a single panel or string, not the broad coverage a tree canopy would cause. Since this moves with time of day, it's more likely an external shadow than a failed diode.` });
+      } else {
+        findings.push({ type:'issue', headline:'DC side: voltage drop with preserved current, constant across the day', resolution:`check ${lowerLabel}'s bypass diode/module`,
+          seeing:`${lowerLabel}'s DC voltage runs at ${(voltageRatio*100).toFixed(0)}% of ${higherLabel}'s with current staying much closer to normal (${(currentRatio*100).toFixed(0)}%)${fractionNote} This holds steady across the day rather than concentrating at one sun angle — real shading from a fixed obstruction still moves with the sun and would show a time-of-day pattern. A constant voltage cap like this, independent of time of day, is more consistent with a bypass diode that has failed shorted and is permanently routing around part of the panel's cell string.`,
+          recommendation:`This points at the panel itself rather than an external obstruction — a diode that has failed shorted will cap voltage at roughly this same fraction all day, every day, regardless of weather or sun position. Worth a module-level inspection or replacement consideration, not a tree-trimming dispatch.` });
       }
     } else if (currentRatio < 0.7 && voltageRatio < 0.95) {
       // amperage AND voltage both down = panel/connection issue, not shading
@@ -1339,7 +1441,7 @@ function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Invert
   }
 
   // ---- Residual: gap exists but neither DC nor AC explains it ----
-  const dcLooksNormal = dc && dc.currentRatio >= 0.7;
+  const dcLooksNormal = dc !== null && !dcExplainsGap;
   const acLooksNormal = !ac || ac.acVoltageRatio >= 0.97; // if AC unavailable, don't block this on AC alone
   if (meaningfulGap && dcLooksNormal && acLooksNormal) {
     findings.push({ type:'issue', headline:'Production gap with no DC or AC electrical explanation', resolution:'consider a power-line communication issue, not a production fault',
@@ -1362,7 +1464,6 @@ document.getElementById('micro-file-a').addEventListener('change', (e) => {
 document.getElementById('micro-file-b').addEventListener('change', (e) => {
   if (e.target.files[0]) { microFileB = e.target.files[0]; document.getElementById('micro-filename-b').textContent = microFileB.name; }
 });
-
 function wireMicroDropzone(zoneId, slot) {
   const zone = document.getElementById(zoneId);
   zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
@@ -1449,7 +1550,7 @@ function renderMicroResult(r) {
       <h3><span class="tag">${tagFor[f.type]}</span> ${f.headline}</h3>
       <div class="label">What I'm seeing</div>
       <p>${f.seeing}</p>
-      <div class="label">${f.type==='issue' ? 'Recommendation' : 'Info'}</div>
+      <div class="label">Recommendation</div>
       <p>${f.recommendation}</p>
     </div>`).join('');
 
