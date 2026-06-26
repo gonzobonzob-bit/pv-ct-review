@@ -703,7 +703,7 @@ function runDiagnostic(parsed) {
         ? 'This export has whole-system Produced/Consumed totals only — no per-leg breakdown and no separate Grid column.'
         : 'This export has Produced/Consumed by leg only — no separate Grid column.',
       recommendation: isWhole
-        ? 'Not a fault — just a scope limit of this export. The cross-talk check below still applies; leg-balance checks don\'t (no legs in this export).'
+        ? 'Not a fault — just a scope limit of this export. The cross-talk check below still applies; leg-balance checks don\'t (no legs in this export) — and that gap is not purely cosmetic: a leg with a real, sustained problem can read as completely healthy here if the other leg\'s normal variation is large enough to mask it in the combined total. If a per-leg export of the same system is available, that view is meaningfully more sensitive to exactly this kind of single-leg issue — it is not just a different presentation of the same information.'
         : 'Not a fault — just a scope limit of this export. Leg-balance and cross-talk checks below still apply.' });
   }
 
