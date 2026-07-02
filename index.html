@@ -76,7 +76,7 @@
   .meta-prov{background:var(--card-alt); border:none; border-radius:8px; padding:8px 14px; margin-bottom:14px; color:var(--muted); font-size:11.5px; line-height:1.6;}
   #chart-zoom-reset{position:absolute; top:10px; right:12px; font-family:var(--sans); font-size:11px; font-weight:700; padding:4px 10px; border-radius:5px; border:1px solid var(--line); background:var(--card); color:var(--muted); cursor:pointer; z-index:5;}
   #chart-zoom-reset:hover{color:var(--ink); border-color:var(--muted);}
-  #chart-popup{position:absolute; z-index:10; width:290px; max-width:80%; background:var(--card); border:1px solid var(--line); border-left:4px solid var(--red); border-radius:8px; padding:12px 14px; box-shadow:0 10px 30px rgba(0,0,0,.5); font-size:12px;}
+  #chart-popup{margin-top:10px; background:var(--card); border:1px solid var(--line); border-left:4px solid var(--red); border-radius:8px; padding:12px 14px; font-size:12px;}
   #chart-popup .pop-tag{font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; font-family:var(--mono);}
   #chart-popup .pop-tag.issue{color:var(--red);}
   #chart-popup .pop-tag.info{color:var(--amber);}
@@ -88,6 +88,8 @@
   #chart-popup .pop-actions a:hover{text-decoration:underline;}
   #chart-svg-container rect[data-hl]{cursor:pointer;}
   #chart-svg-container rect[data-hl]:hover{opacity:.2;}
+  .chart-card.zoomed #chart-svg-container{cursor:zoom-out;}
+  .chart-card.zoomed #chart-svg-container rect[data-hl]{cursor:zoom-out;}
   .show-chart-row{margin:2px 0 6px;}
   .show-chart{font-size:11.5px; font-weight:700; color:var(--orange); text-decoration:none;}
   .show-chart:hover{text-decoration:underline;}
@@ -199,9 +201,9 @@
     <div id="examples-panel" style="display:none;">
       <div class="ex-row">
         <span class="rc-label">Show me a</span>
-        <select id="ex-kind"><option value="good">good (healthy)</option><option value="bad">bad (confirmed issue)</option></select>
-        <span class="rc-label">system from</span>
-        <select id="ex-mfr"><option value="enphase">Enphase</option><option value="qcells">QCells</option><option value="tesla">Tesla</option></select>
+        <select id="ex-kind" onchange="populateExampleNums()"><option value="good">good (healthy)</option><option value="bad">bad (confirmed issue)</option></select>
+        <span class="rc-label">system:</span>
+        <select id="ex-num"></select>
         <button class="rc-btn" onclick="loadExample()">Load example</button>
       </div>
       <div class="ex-blurb" id="ex-blurb"></div>
@@ -1574,7 +1576,7 @@ function runDiagnostic(parsed) {
 // diagnostic pipeline at generation time.
 const EXAMPLES = {
   qcells: {
-    good: { name: "qcells_good_example.csv", blurb: "Healthy QCells reference — production, grid and usage reconcile to within ~1W, and Load moves independently of PV.", csv: `"","PV","Grid","Load","PV Produced","Load Consumed","Grid Voltage L1","Grid Voltage L2","Grid Current L1","Grid Current L2","Grid Frequency","SOC"
+    good: { name: "example_good_1.csv", blurb: "Healthy reference — production, grid and usage reconcile to within ~1W, and Load moves independently of PV.", csv: `"","PV","Grid","Load","PV Produced","Load Consumed","Grid Voltage L1","Grid Voltage L2","Grid Current L1","Grid Current L2","Grid Frequency","SOC"
 "Jun 24, 2026 (00:00)","-2.8666666666666667","285.8906656901042","282","0","71","123.52533315022787","123.06133422851562","5.045333385467529","2.8793334007263183","60.000666809082034",""
 "Jun 24, 2026 (00:15)","-2.7333333333333334","287.3560038248698","283","0","142","123.74399973551432","123.2326670328776","5.134666697184245","2.8846667766571046","60.00933303833008",""
 "Jun 24, 2026 (00:30)","-2.7333333333333334","390.06666259765626","386","0","237","123.67533264160156","123.21599934895833","5.078000005086263","2.4220000743865966","60.00466664632162",""
@@ -1671,7 +1673,7 @@ const EXAMPLES = {
 "Jun 24, 2026 (23:15)","","","","","","","","","","",""
 "Jun 24, 2026 (23:30)","","","","","","","","","","",""
 "Jun 24, 2026 (23:45)","","","","","","","","","","",""` },
-    bad: { name: "qcells_crosstalk_example.csv", blurb: "Confirmed CT cross-talk — during cloud swings, Load mirrors PV step-for-step (0.91 correlation in the volatile window). The consumption CT is picking up the production conductor’s field.", csv: `"","PV","Grid","Load","PV Produced","Load Consumed","Grid Voltage L1","Grid Voltage L2","Grid Current L1","Grid Current L2","Grid Frequency","SOC"
+    bad: { name: "example_bad_1.csv", blurb: "Confirmed CT cross-talk — during cloud swings, Load mirrors PV step-for-step (0.91 correlation in the volatile window). The consumption CT is picking up the production conductor’s field.", csv: `"","PV","Grid","Load","PV Produced","Load Consumed","Grid Voltage L1","Grid Voltage L2","Grid Current L1","Grid Current L2","Grid Frequency","SOC"
 "Jun 25, 2026 (00:00)","-1","-2822.328379313151","0","0","0","122.8783327738444","121.14499791463216","17.53000013033549","8.538333217302958","59.99000040690104",""
 "Jun 25, 2026 (00:15)","","","","","","","","","","",""
 "Jun 25, 2026 (00:30)","","","","","","","","","","",""
@@ -1770,7 +1772,7 @@ const EXAMPLES = {
 "Jun 25, 2026 (23:45)","","","","","","","","","","",""` },
   },
   enphase: {
-    good: { name: "enphase_good_example.csv", blurb: "Healthy Enphase reference — both consumption legs report independently, and production/usage move independently.", csv: `"DateTime","Series 5","Series 6","Produced","L2(B)","L1(A)","Consumed","L1(A)","L2(B)"
+    good: { name: "example_good_2.csv", blurb: "Healthy reference — both consumption legs report independently, and production/usage move independently.", csv: `"DateTime","Series 5","Series 6","Produced","L2(B)","L1(A)","Consumed","L1(A)","L2(B)"
 "2026-06-19 00:00:00",,,,0,0,,212,188
 "2026-06-19 00:15:00",,,,0,0,,208,252
 "2026-06-19 00:30:00",,,,0,0,,208,160
@@ -2423,7 +2425,7 @@ const EXAMPLES = {
 "2026-06-25 18:00:00",0,,,,,,,
 "2026-06-25 18:01:32",0,,,,,,,
 "2026-06-25 21:00:00",0,,,,,,,` },
-    bad: { name: "enphase_crosstalk_example.csv", blurb: "Confirmed CT cross-talk on an Enphase system — 0.91 correlation during a cloud-transient window on 6/27.", csv: `"DateTime","Series 5","Series 6","Produced","L2(B)","L1(A)","Consumed","L2(B)","L1(A)"
+    bad: { name: "example_bad_2.csv", blurb: "Confirmed CT cross-talk — 0.91 correlation during a cloud-transient window on 6/27.", csv: `"DateTime","Series 5","Series 6","Produced","L2(B)","L1(A)","Consumed","L2(B)","L1(A)"
 "2026-06-24 00:00:00",,,,0,0,,737,900.48
 "2026-06-24 00:15:00",,,,0,0,,974.04,1218.04
 "2026-06-24 00:30:00",,,,0,0,,1032.6,1239.08
@@ -3056,7 +3058,7 @@ const EXAMPLES = {
 "2026-06-30 15:00:00",0,,,,,,,` },
   },
   tesla: {
-    good: { name: "tesla_good_example.csv", blurb: "Healthy Tesla reference (2 days). Note: Load is derived on Tesla exports (Solar + Site + Battery), so the cross-talk check is intentionally not applicable — the report says so explicitly.", csv: `timestamp,datetime,uid,solar_instant_power,site_instant_power,battery_instant_power,load_instant_real_power
+    good: { name: "example_good_3.csv", blurb: "Healthy reference (2 days). Note: this platform derives Load (Solar + Site + Battery), so the cross-talk check is intentionally not applicable — the report says so explicitly.", csv: `timestamp,datetime,uid,solar_instant_power,site_instant_power,battery_instant_power,load_instant_real_power
 1781841880000,2026-06-19T00:04:40.000,STE20260212-00979,0,2791,0.3,2791.3
 1781842335000,2026-06-19T00:12:15.000,STE20260212-00979,0,2728,0,2728
 1781842790000,2026-06-19T00:19:50.000,STE20260212-00979,0,4961.4,0,4961.4
@@ -3438,7 +3440,7 @@ const EXAMPLES = {
 1782013870000,2026-06-20T23:51:10.000,STE20260212-00979,0,3803.6,0,3803.6
 1782014325000,2026-06-20T23:58:45.000,STE20260212-00979,0,3258.7,0.1,3258.8
 ` },
-    bad: { name: "tesla_outage_example.csv", blurb: "Multi-day production outage on a Tesla system — 9 consecutive mid-winter days far below typical output (trimmed from a year-long export, 30-min resolution). A different fault type than cross-talk, which can’t be tested on Tesla’s derived Load.", csv: `timestamp,datetime,uid,solar_instant_power,site_instant_power,load_instant_real_power
+    bad: { name: "example_bad_3.csv", blurb: "Multi-day production outage — 9 consecutive mid-winter days far below typical output (trimmed from a year-long export, 30-min resolution). A different fault type than cross-talk, which can’t be tested on this platform’s derived Load.", csv: `timestamp,datetime,uid,solar_instant_power,site_instant_power,load_instant_real_power
 1768712400000,2026-01-18T00:00:00.000,STE20250512-00957,0,245.23473398309005,245.23473398309005
 1768714200000,2026-01-18T00:30:00.000,STE20250512-00957,0,452.32849884033203,452.32849884033203
 1768716000000,2026-01-18T01:00:00.000,STE20250512-00957,0,333.2255035400391,333.2255035400391
@@ -4507,6 +4509,7 @@ function zoomToHighlight(idx, anchorX, anchorY) {
   __chartZoom = { startMs: hl.startMs - margin, endMs: hl.endMs + margin, hlIdx: idx };
   renderChart(__currentChart.points, __currentChart.mode, __currentChart.highlights, __chartZoom);
   const zr = document.getElementById('chart-zoom-reset'); if (zr) zr.style.display = 'inline-block';
+  const cc = document.getElementById('chart-card'); if (cc) cc.className = 'chart-card zoomed';
   showChartPopup(hl, anchorX, anchorY);
 }
 
@@ -4516,6 +4519,7 @@ function resetChartZoom() {
   hideChartPopup();
   renderChart(__currentChart.points, __currentChart.mode, __currentChart.highlights);
   const zr = document.getElementById('chart-zoom-reset'); if (zr) zr.style.display = 'none';
+  const cc = document.getElementById('chart-card'); if (cc) cc.className = 'chart-card';
 }
 
 function showOnChart(idx) {
@@ -4541,11 +4545,7 @@ function showChartPopup(hl, anchorX, anchorY) {
       <a href="#chart-card" onclick="hideChartPopup();return false;">Close ✕</a>
     </div>`;
   pop.style.borderLeftColor = hl.color === 'red' ? 'var(--red)' : 'var(--amber)';
-  pop.style.display = 'block';
-  const cardEl = document.getElementById('chart-card');
-  const maxLeft = Math.max(8, (cardEl.clientWidth || 720) - 300);
-  pop.style.left = Math.min(anchorX !== undefined ? anchorX : 60, maxLeft) + 'px';
-  pop.style.top = (anchorY !== undefined ? Math.min(anchorY, 130) : 34) + 'px';
+  pop.style.display = 'block'; // docked below the plot — never covers the zoomed area
 }
 
 function hideChartPopup() {
@@ -4568,10 +4568,12 @@ function rerunOnZoom() {
 // Delegated listeners: the SVG is re-rendered wholesale on every draw, so
 // listen on the stable container rather than the transient rects.
 document.getElementById('chart-svg-container').addEventListener('click', (e) => {
+  // While zoomed, a click anywhere on the graph exits the zoom — same as
+  // the Reset button.
+  if (__chartZoom) { resetChartZoom(); return; }
   const rect = e.target.closest ? e.target.closest('rect[data-hl]') : null;
   if (!rect) return;
-  const wrap = document.getElementById('chart-card').getBoundingClientRect();
-  zoomToHighlight(parseInt(rect.getAttribute('data-hl'), 10), e.clientX - wrap.left, e.clientY - wrap.top + 12);
+  zoomToHighlight(parseInt(rect.getAttribute('data-hl'), 10));
 });
 document.addEventListener('click', (e) => {
   const pop = document.getElementById('chart-popup');
@@ -4587,12 +4589,27 @@ function toggleExamples() {
   const on = panel.style.display === 'none';
   panel.style.display = on ? 'block' : 'none';
   document.getElementById('examples-toggle').textContent = on ? '📂 Examples: on' : '📂 Examples: off';
+  if (on) populateExampleNums();
+}
+
+// Flat, numbered example list per kind — the dropdown offers 'Example 1..N'
+// and the blurb (shown after loading) explains what each one demonstrates.
+function exampleList(kind) {
+  const out = [];
+  for (const mfr of Object.keys(EXAMPLES)) { const e = EXAMPLES[mfr] && EXAMPLES[mfr][kind]; if (e) out.push(e); }
+  return out;
+}
+
+function populateExampleNums() {
+  const kind = document.getElementById('ex-kind').value;
+  const list = exampleList(kind);
+  document.getElementById('ex-num').innerHTML = list.map((e, i) => `<option value="${i}">Example ${i + 1}</option>`).join('');
 }
 
 function loadExample() {
   const kind = document.getElementById('ex-kind').value;
-  const mfr = document.getElementById('ex-mfr').value;
-  const ex = EXAMPLES[mfr] && EXAMPLES[mfr][kind];
+  const idx = parseInt(document.getElementById('ex-num').value, 10);
+  const ex = exampleList(kind)[idx];
   if (!ex) return;
   document.getElementById('ex-blurb').textContent = ex.blurb;
   processCSVText(ex.csv, ex.name);
@@ -4748,6 +4765,7 @@ function renderReport(report, parsed, filename) {
   __chartZoom = null;
   hideChartPopup();
   const zrBtn = document.getElementById('chart-zoom-reset'); if (zrBtn) zrBtn.style.display = 'none';
+  const ccEl = document.getElementById('chart-card'); if (ccEl) ccEl.className = 'chart-card';
   renderChart(parsed.points, parsed.mode, report.highlights);
 
   const BANNER = {
