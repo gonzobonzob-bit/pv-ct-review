@@ -69,7 +69,8 @@
   .rc-btn.ghost{background:transparent; color:var(--muted); border:1px solid var(--line);}
   .rc-btn.ghost:hover{color:var(--ink); border-color:var(--muted);}
   .rc-note{color:var(--muted); font-size:11.5px;}
-  .examples-bar{margin:-6px 0 18px;}
+  .examples-bar{margin:0 0 16px; text-align:center;}
+  #examples-panel{text-align:left;}
   #examples-panel{background:var(--card-alt); border:none; border-radius:8px; padding:12px 14px; margin-top:8px;}
   .ex-row{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
   .ex-blurb{color:var(--muted); font-size:12px; margin-top:8px; line-height:1.5;}
@@ -189,13 +190,6 @@
     <p>Drop in a CSV export for an instant diagnostic — negative-PV artifacts, Grid/Load balance, leg correlation, cross-talk detection. Runs entirely in your browser. No upload, no server, no AI call.</p>
   </header>
 
-  <div class="upload-card" id="upload-card">
-    <label class="upload-label" for="file-input">Choose CSV file</label>
-    <input type="file" id="file-input" accept=".csv">
-    <div class="upload-hint">or drag and drop a .csv file here</div>
-    <div class="filename" id="filename"></div>
-  </div>
-
   <div class="examples-bar">
     <button class="rc-btn ghost" id="examples-toggle" onclick="toggleExamples()">📂 Examples: off</button>
     <div id="examples-panel" style="display:none;">
@@ -209,6 +203,14 @@
       <div class="ex-blurb" id="ex-blurb"></div>
     </div>
   </div>
+
+  <div class="upload-card" id="upload-card">
+    <label class="upload-label" for="file-input">Choose CSV file</label>
+    <input type="file" id="file-input" accept=".csv">
+    <div class="upload-hint">or drag and drop a .csv file here</div>
+    <div class="filename" id="filename"></div>
+  </div>
+
 
   <div id="error" class="error-box" style="display:none;"></div>
 
