@@ -46,7 +46,7 @@
   header p{margin:0 auto; color:var(--muted); font-size:13px; max-width:560px;}
 
   .upload-card{
-    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    background:var(--card); border:1px dashed var(--line); border-radius:10px;
     padding:24px; margin-bottom:18px; text-align:center;
   }
   .upload-card.dragover{border-color:var(--orange); background:var(--card-alt);}
@@ -61,7 +61,7 @@
   .sources{font-size:11.5px; color:var(--muted); margin-top:10px; line-height:1.6;}
   .sources a{color:var(--muted); text-decoration:underline; text-underline-offset:2px;}
   .sources a:hover{color:var(--ink);}
-  .range-controls{display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:12.5px;}
+  .range-controls{display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:var(--card-alt); border:none; border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:12.5px;}
   .range-controls select, .ex-row select{background:var(--card-alt); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:4px 8px; font-size:12.5px;}
   .rc-label{color:var(--muted); font-size:12px;}
   .rc-btn{background:var(--orange); color:#1a1006; border:none; border-radius:5px; padding:5px 12px; font-size:12px; font-weight:700; cursor:pointer;}
@@ -70,13 +70,13 @@
   .rc-btn.ghost:hover{color:var(--ink); border-color:var(--muted);}
   .rc-note{color:var(--muted); font-size:11.5px;}
   .examples-bar{margin:-6px 0 18px;}
-  #examples-panel{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-top:8px;}
+  #examples-panel{background:var(--card-alt); border:none; border-radius:8px; padding:12px 14px; margin-top:8px;}
   .ex-row{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
   .ex-blurb{color:var(--muted); font-size:12px; margin-top:8px; line-height:1.5;}
-  .meta-prov{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 14px; margin-bottom:14px; color:var(--muted); font-size:11.5px; line-height:1.6;}
+  .meta-prov{background:var(--card-alt); border:none; border-radius:8px; padding:8px 14px; margin-bottom:14px; color:var(--muted); font-size:11.5px; line-height:1.6;}
   .error-box{background:var(--red-bg); border:1px solid var(--red-line); color:var(--red); border-radius:8px; padding:12px 16px; font-size:13px; margin-bottom:18px;}
 
-  .status-banner{border-radius:10px 10px 0 0; padding:18px 22px; color:#fff; display:flex; align-items:center; gap:14px;}
+  .status-banner{border-radius:8px 8px 0 0; padding:18px 22px; color:#fff; display:flex; align-items:center; gap:14px;}
   .status-banner.flag{background:var(--red);}
   .status-banner.ok{background:var(--green);}
   .status-banner.warn{background:var(--amber);}
@@ -84,8 +84,8 @@
   .status-banner .text h2{margin:0; font-size:19px; color:#fff;}
   .status-banner .text p{margin:2px 0 0; font-size:12.5px; opacity:.92; color:#fff;}
 
-  .quick-section{background:var(--card); border:1px solid var(--line); border-top:none; border-radius:0 0 10px 10px; padding:4px 0 8px; margin-bottom:22px;}
-  .quick-line{display:flex; align-items:flex-start; gap:10px; padding:11px 22px; border-bottom:1px solid var(--line); text-decoration:none; color:var(--ink);}
+  .quick-section{background:var(--card-alt); border:none; border-radius:0 0 8px 8px; padding:4px 0 8px; margin-bottom:22px;}
+  .quick-line{display:flex; align-items:flex-start; gap:10px; padding:11px 22px; border-bottom:1px solid rgba(255,255,255,.05); text-decoration:none; color:var(--ink);}
   .quick-line:last-child{border-bottom:none;}
   .quick-line:hover{background:var(--card-alt);}
   .quick-line .bullet{font-size:15px; flex-shrink:0; width:18px; text-align:center; margin-top:1px;}
@@ -97,25 +97,32 @@
   .quick-line .jump{margin-left:auto; font-size:11.5px; color:var(--muted); white-space:nowrap; padding-left:10px;}
 
   .section-title{font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--orange); margin:0 0 12px;}
-  .detail-card{background:var(--card); border:1px solid var(--line); border-left:4px solid var(--line); border-radius:8px; padding:16px 20px; margin-bottom:14px;}
+  /* Flat-rail cards: no outline, slightly lighter fill, a bold colored left
+     rail and colored headline — status reads instantly from the rail. */
+  .detail-card{background:var(--card-alt); border:none; border-left:4px solid var(--line); border-radius:6px; padding:16px 20px; margin-bottom:12px;}
   .detail-card.issue{border-left-color:var(--red);}
   .detail-card.confirmed{border-left-color:var(--green);}
   .detail-card.info{border-left-color:var(--amber);}
-  .detail-card h3{margin:0 0 10px; font-size:14.5px; display:flex; align-items:center; gap:8px; color:var(--ink);}
-  .detail-card h3 .tag{font-size:10px; text-transform:uppercase; letter-spacing:.4px; font-weight:800; padding:2px 8px; border-radius:10px;}
-  .detail-card.issue h3 .tag{background:var(--red-bg); color:var(--red);}
-  .detail-card.confirmed h3 .tag{background:var(--green-bg); color:var(--green);}
-  .detail-card.info h3 .tag{background:var(--amber-bg); color:var(--amber);}
+  .detail-card h3{margin:0 0 10px; font-size:14.5px; display:flex; align-items:center; gap:10px; color:var(--ink);}
+  .detail-card.issue h3{color:var(--red);}
+  .detail-card.confirmed h3{color:var(--green);}
+  .detail-card.info h3{color:var(--amber);}
+  .detail-card h3 .tag{font-size:10px; text-transform:uppercase; letter-spacing:.7px; font-weight:800; padding:0; border-radius:0; opacity:.85; flex-shrink:0;}
+  .detail-card.issue h3 .tag{color:var(--red);}
+  .detail-card.confirmed h3 .tag{color:var(--green);}
+  .detail-card.info h3 .tag{color:var(--amber);}
   .detail-card .label{font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:700; margin-top:10px;}
   .detail-card p{margin:4px 0 0; font-size:13px; color:var(--ink);}
-  .plain-summary{margin-top:14px; padding:12px 14px; background:var(--card-alt); border:1px dashed var(--line); border-radius:8px;}
+  .measured{font-family:var(--mono); font-size:12px; color:var(--muted); background:var(--bg); border-radius:4px; padding:7px 10px; margin:2px 0 4px; line-height:1.6;}
+  .plain-summary{margin-top:14px; padding:12px 14px; background:var(--bg); border:none; border-left:3px solid var(--orange); border-radius:4px;}
+  .plain-summary.assurance-box{border-left-color:var(--green);}
   .plain-summary-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--orange);}
   .plain-summary-label.assurance{color:var(--green);}
   .plain-summary p{margin-top:6px; font-style:italic;}
 
   .meta-row{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:10px; flex-wrap:wrap; gap:6px;}
   .meta-row b{color:var(--ink); font-family:var(--mono);}
-  .chart-card{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:18px;}
+  .chart-card{background:var(--card-alt); border:none; border-radius:8px; padding:14px 16px; margin-bottom:18px;}
   .chart-legend{display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:8px;}
   .chart-legend span{display:inline-flex; align-items:center; gap:6px;}
   .chart-legend .dot{width:9px; height:9px; border-radius:50%; display:inline-block;}
@@ -1022,6 +1029,7 @@ function runDiagnostic(parsed) {
   const portalName = isQCells ? 'Q.OMMAND Pro app' : (isTeslaPlat ? 'Tesla One' : 'Enlighten/Installer Portal');
   const gatewayName = isQCells ? 'Q.HOME COMBINER' : (isTeslaPlat ? 'Powerwall Gateway' : 'IQ Gateway/Envoy');
   const items = [];
+  const highlights = []; // time ranges to shade on the rendered chart
 
   const MIN_POINTS = 4;
   if (points.length < MIN_POINTS) {
@@ -1278,7 +1286,8 @@ function runDiagnostic(parsed) {
               ? `Production/Load step-change correlation: ${diffR.toFixed(2)} overall, but ${worstDay.r.toFixed(2)} on ${worstDay.day}`
               : `Production/Load step-change correlation: ${diffR.toFixed(2)} (raw: ${rawR!==null?rawR.toFixed(2):'—'})`,
           resolution: 'investigate possible CT cross-talk',
-          seeing: numbersLine + '. ' + (windowConcerning
+          measured: numbersLine,
+          seeing: (windowConcerning
             ? `Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. The overall and per-day figures can look fine while still hiding a real signal inside a shorter, more volatile stretch — scanned every window in the data for the strongest correlation, prioritizing cloud-transient-like stretches (the kind of period where an independent Load has no ordinary reason to track PV's swings) over calm ones, and found ${escHtml(worstWindow.startTime)} to ${escHtml(worstWindow.endTime)} (${worstWindow.n} points, PV swung ${worstWindow.pvRange.toFixed(0)}W in that stretch) reading ${worstWindow.r.toFixed(2)} — there's no plausible reason an independent household load would mirror a fast solar swing from passing clouds within the same 15 minutes, which makes a volatile-window match like this more diagnostic than a calm-period match would be.`
             : dayConcerning
               ? `Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. The overall figure across the whole export looks fine, but that blends every day together — checked each calendar day individually, and ${worstDay.day} alone (${worstDay.n} points) shows ${worstDay.r.toFixed(2)}, in the same range as a confirmed real cross-talk case. A concentrated multi-day period like this can hide inside a healthy-looking overall average.`
@@ -1286,13 +1295,21 @@ function runDiagnostic(parsed) {
           recommendation: '<strong>Remote check:</strong> run the CT Health Check on the Consumption meter — if it flags a polarity or branch issue, that\'s a faster, fully remote explanation worth ruling out first.' + (windowConcerning ? ' This already looks at a passing-cloud window specifically, which is the strongest available evidence short of a physical inspection — worth treating this with more confidence than a general overall-correlation flag.' : ' Also worth pulling a second, different day (ideally one with choppy/cloud-broken production) — if Load tracks PV\'s wiggles tightly on that day too, that strengthens the case for real cross-talk rather than coincidence.') + ' <strong>If it escalates:</strong> if the health check is clean and the pattern holds, this needs a truck roll — real CT cross-talk means the Consumption CT is physically picking up the Production conductor\'s field (adjacent-conductor pickup is a documented CT failure mode — Continental Control Systems publishes spacing guidance on exactly this), and it\'s fixed by relocating/separating the CTs, not a software setting.',
           plainSummary: 'Usage and production are showing up a little too similarly in the data, which usually means two sensors are positioned too close together rather than anything wrong with actual system performance. Typically resolved by repositioning a sensor.',
           sources: [CITATIONS.ctCross, CITATIONS.enphaseCt, CITATIONS.sandia] });
+        if (windowConcerning) {
+          const ws = parseTimeSafe(worstWindow.startTime), we = parseTimeSafe(worstWindow.endTime);
+          if (ws && we) highlights.push({ startMs: ws.getTime(), endMs: we.getTime(), color: 'red', label: `flagged window (${worstWindow.r.toFixed(2)})` });
+        } else if (dayConcerning) {
+          const d0 = new Date(worstDay.day + 'T00:00:00');
+          if (!isNaN(d0.getTime())) highlights.push({ startMs: d0.getTime(), endMs: d0.getTime() + 86399000, color: 'red', label: `flagged day (${worstDay.r.toFixed(2)})` });
+        }
       } else if (worstWindow && worstWindow.highConfidence) {
         items.push({ type:'confirmed',
           headline: `Production/Load step-change correlation: ${diffR.toFixed(2)} (raw: ${rawR!==null?rawR.toFixed(2):'—'})`,
           resolution: 'tested against a real volatile window — no cross-talk indicated',
-          seeing: `Measured: ${diffR.toFixed(2)} overall across the full export`
+          measured: `Measured: ${diffR.toFixed(2)} overall across the full export`
             + (worstDay ? `; ${worstDay.r.toFixed(2)} on its worst single day (${worstDay.day})` : '')
-            + `; ${worstWindow.r.toFixed(2)} during its most volatile window (${escHtml(worstWindow.startTime)} to ${escHtml(worstWindow.endTime)}). Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. This export included a genuinely volatile, cloud-transient-like window, and the reading through it stayed low — that's real evidence of independent measurement, not just an absence of concern.`,
+            + `; ${worstWindow.r.toFixed(2)} during its most volatile window (${escHtml(worstWindow.startTime)} to ${escHtml(worstWindow.endTime)})`,
+          seeing: `Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. This export included a genuinely volatile, cloud-transient-like window, and the reading through it stayed low — that's real evidence of independent measurement, not just an absence of concern.`,
           recommendation: 'None — this is a real clean result, tested against volatile data.',
           plainSummary: 'Production and usage were tested against a real choppy, cloud-driven stretch and still moved independently — that is a genuine clean result, not just an absence of concern.',
           sources: [CITATIONS.sandia, CITATIONS.epri] });
@@ -1373,6 +1390,9 @@ function runDiagnostic(parsed) {
       }
       const sudden = suddenCutoffDetected;
 
+      for (const fc of effectiveFlaggedFlats) {
+        if (fc.result.startTime && fc.result.endTime) highlights.push({ startMs: fc.result.startTime.getTime(), endMs: fc.result.endTime.getTime(), color: 'amber', label: fc.label + ' flat' });
+      }
       const timeline = classifyTimelinePosition(effectiveFlaggedFlats[0].result);
 
       items.push({
@@ -1511,10 +1531,14 @@ function runDiagnostic(parsed) {
   return {
     status: issues.length>0 ? 'TROUBLESHOOT' : 'GOOD',
     summary: issues.length>0
-      ? `${issues.length} issue(s) flagged, ${items.length-issues.length} other item(s)`
+      ? (() => {
+          const res = (issues[0].resolution || '').length > 72 ? issues[0].resolution.slice(0, 70) + '…' : issues[0].resolution;
+          return issues.length === 1 ? `1 issue: ${res}` : `${issues.length} issues: ${res} (+${issues.length - 1} more)`;
+        })()
       : (incLabel ? `No issues flagged — ${incLabel}` : 'No issues flagged'),
     items,
-    provenance
+    provenance,
+    highlights
   };
 }
 </script>
@@ -4470,7 +4494,7 @@ function showError(msg) { errorBox.textContent = msg; errorBox.style.display = '
 // a quick visual recreation of the original monitoring-portal chart, so the
 // data can be eyeballed alongside the automated findings rather than only
 // trusting the numbers.
-function renderChart(points, mode) {
+function renderChart(points, mode, highlights) {
   const labels = {
     pv: mode === 'tesla_derived' ? 'Solar' : (mode==='legs_only'||mode==='whole_system'||mode==='whole_system_battery') ? 'Production' : 'PV',
     grid: mode === 'tesla_derived' ? 'Site' : 'Grid',
@@ -4505,6 +4529,32 @@ function renderChart(points, mode) {
   const y = v => padT + plotH - ((v - minV) / (maxV - minV)) * plotH;
   const zeroY = y(0);
 
+  // Shaded bands over flagged time ranges (cross-talk windows in red,
+  // flatline runs in amber) so the problem region is visible on the chart
+  // itself, not just described in text.
+  const sampleMs = sampled.map(p => { const t = parseTimeSafe(p.time); return t ? t.getTime() : null; });
+  let bands = '';
+  for (const hl of (highlights || [])) {
+    let first = -1, last = -1;
+    for (let i = 0; i < sampleMs.length; i++) {
+      if (sampleMs[i] === null) continue;
+      if (sampleMs[i] >= hl.startMs && sampleMs[i] <= hl.endMs) { if (first === -1) first = i; last = i; }
+    }
+    if (first === -1 || last <= first) continue;
+    const bx = x(first), bw = Math.max(2, x(last) - x(first));
+    const col = hl.color === 'red' ? 'var(--red)' : 'var(--amber)';
+    bands += `<rect x="${bx.toFixed(1)}" y="${padT}" width="${bw.toFixed(1)}" height="${plotH}" fill="${col}" opacity="0.10"/>`
+      + `<line x1="${bx.toFixed(1)}" y1="${padT}" x2="${bx.toFixed(1)}" y2="${padT + plotH}" stroke="${col}" stroke-width="1" opacity="0.5"/>`
+      + `<line x1="${(bx + bw).toFixed(1)}" y1="${padT}" x2="${(bx + bw).toFixed(1)}" y2="${padT + plotH}" stroke="${col}" stroke-width="1" opacity="0.5"/>`
+      + `<text x="${(bx + 3).toFixed(1)}" y="${padT + 10}" font-size="8.5" fill="${col}" font-family="Courier New, monospace">${hl.label}</text>`;
+  }
+
+  // Y-axis max reference so the scale is readable, not just the zero line.
+  const maxData = Math.max(...allVals);
+  const fmtW = v => Math.abs(v) >= 1000 ? ((v / 1000).toFixed(1).replace(/\.0$/, '') + 'kW') : (Math.round(v) + 'W');
+  const maxY = y(maxData);
+  const maxLine = maxData > 0 ? `<line x1="${padL}" y1="${maxY.toFixed(1)}" x2="${W - padR}" y2="${maxY.toFixed(1)}" stroke="#3a3e46" stroke-width="1" stroke-dasharray="2,4"/><text x="${padL - 6}" y="${(maxY + 3).toFixed(1)}" font-size="9" fill="#6b7280" text-anchor="end" font-family="Courier New, monospace">${fmtW(maxData)}</text>` : '';
+
   const lines = series.map(k => {
     const pts = sampled.map((p, i) => {
       const v = p[k];
@@ -4535,8 +4585,10 @@ function renderChart(points, mode) {
   }
 
   const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;">
+    ${bands}
     <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${W - padR}" y2="${zeroY.toFixed(1)}" stroke="#3a3e46" stroke-width="1" stroke-dasharray="3,3"/>
     <text x="${padL - 6}" y="${(zeroY + 3).toFixed(1)}" font-size="9" fill="#6b7280" text-anchor="end" font-family="Courier New, monospace">0</text>
+    ${maxLine}
     ${lines}
     ${xLabels}
   </svg>`;
@@ -4573,7 +4625,7 @@ function renderReport(report, parsed, filename) {
     provEl.textContent = parts.join(' ');
     provEl.style.display = 'block';
   } else provEl.style.display = 'none';
-  renderChart(parsed.points, parsed.mode);
+  renderChart(parsed.points, parsed.mode, report.highlights);
 
   const BANNER = {
     GOOD: { cls:'ok', icon:'🟢', headline:'GOOD' },
@@ -4589,24 +4641,33 @@ function renderReport(report, parsed, filename) {
 
   const bulletFor = { issue: '✗', confirmed: '✓', info: 'ⓘ' };
   const tagFor = { issue: 'Issue', confirmed: 'Confirmed normal', info: 'Info' };
+  // Issues surface first, then info/inconclusive, then confirmed-normal —
+  // a red banner should never make the reader hunt for the actual problem.
+  const rank = { issue: 0, info: 1, confirmed: 2 };
+  const ordered = [...report.items].sort((a, b) => (rank[a.type] ?? 3) - (rank[b.type] ?? 3));
 
-  document.getElementById('quick-lines').innerHTML = report.items.map((it, i) => `
+  document.getElementById('quick-lines').innerHTML = ordered.map((it, i) => `
     <a class="quick-line" href="#item-${i}">
       <span class="bullet ${it.type}">${bulletFor[it.type]}</span>
       <span class="line-text"><b>${it.headline}</b> → ${it.resolution}</span>
       <span class="jump">Details ↓</span>
     </a>`).join('');
 
-  document.getElementById('detail-cards').innerHTML = report.items.map((it, i) => `
+  document.getElementById('detail-cards').innerHTML = ordered.map((it, i) => {
+    const rec = (it.recommendation || '').trim();
+    const showRec = rec && !/^none\.?$/i.test(rec);
+    return `
     <div class="detail-card ${it.type}" id="item-${i}">
       <h3><span class="tag">${tagFor[it.type]}</span> ${it.headline}</h3>
+      ${it.measured ? `<div class="measured">${it.measured}</div>` : ''}
       <div class="label">What I'm seeing</div>
       <p>${it.seeing}</p>
-      <div class="label">${it.type==='issue' ? 'Recommendation' : 'Info'}</div>
-      <p>${it.recommendation}</p>
-      ${it.plainSummary ? `<div class="plain-summary"><div class="plain-summary-label${it.type==='confirmed' ? ' assurance' : ''}">${it.type==='confirmed' ? '✅ Assurance' : '💡 Insight'}</div><p>${it.plainSummary}</p></div>` : ''}
+      ${showRec ? `<div class="label">${it.type==='issue' ? 'Recommendation' : 'Info'}</div>
+      <p>${it.recommendation}</p>` : ''}
+      ${it.plainSummary ? `<div class="plain-summary${it.type==='confirmed' ? ' assurance-box' : ''}"><div class="plain-summary-label${it.type==='confirmed' ? ' assurance' : ''}">${it.type==='confirmed' ? '✅ Assurance' : '💡 Insight'}</div><p>${it.plainSummary}</p></div>` : ''}
       ${it.sources && it.sources.length ? `<div class="sources">Sources: ${it.sources.map(s => `<a href="${s.url}" target="_blank" rel="noopener noreferrer">${s.label}</a>`).join(' · ')}</div>` : ''}
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   resultsEl.style.display = 'block';
 }
@@ -5013,14 +5074,16 @@ function renderMicroResult(r) {
   const bulletFor = { issue: '✗', confirmed: '✓', info: 'ⓘ' };
   const tagFor = { issue: 'Issue', confirmed: 'Confirmed normal', info: 'Info' };
 
-  document.getElementById('micro-quick-lines').innerHTML = findings.map((f, i) => `
+  const rankM = { issue: 0, info: 1, confirmed: 2 };
+  const orderedM = [...findings].sort((a, b) => (rankM[a.type] ?? 3) - (rankM[b.type] ?? 3));
+  document.getElementById('micro-quick-lines').innerHTML = orderedM.map((f, i) => `
     <a class="quick-line" href="#micro-item-${i}">
       <span class="bullet ${f.type}">${bulletFor[f.type]}</span>
       <span class="line-text"><b>${f.headline}</b> → ${f.resolution}</span>
       <span class="jump">Details ↓</span>
     </a>`).join('');
 
-  document.getElementById('micro-detail-cards').innerHTML = findings.map((f, i) => `
+  document.getElementById('micro-detail-cards').innerHTML = orderedM.map((f, i) => `
     <div class="detail-card ${f.type}" id="micro-item-${i}">
       <h3><span class="tag">${tagFor[f.type]}</span> ${f.headline}</h3>
       <div class="label">What I'm seeing</div>
