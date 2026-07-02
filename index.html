@@ -58,6 +58,9 @@
   .upload-label:hover{background:var(--orange-light);}
   .upload-hint{font-size:12px; color:var(--muted); margin-top:10px;}
   .filename{font-family:var(--mono); font-size:12.5px; color:var(--ink); margin-top:10px;}
+  .sources{font-size:11.5px; color:var(--muted); margin-top:10px; line-height:1.6;}
+  .sources a{color:var(--muted); text-decoration:underline; text-underline-offset:2px;}
+  .sources a:hover{color:var(--ink);}
   .error-box{background:var(--red-bg); border:1px solid var(--red-line); color:var(--red); border-radius:8px; padding:12px 16px; font-size:13px; margin-bottom:18px;}
 
   .status-banner{border-radius:10px 10px 0 0; padding:18px 22px; color:#fff; display:flex; align-items:center; gap:14px;}
@@ -260,6 +263,22 @@
 // Escape CSV-derived strings before they reach innerHTML — timestamps and
 // filenames come straight out of user-supplied files.
 function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// Published sources behind the thresholds and interpretive claims. Findings
+// attach the relevant subset as clickable links so a skeptical reader can
+// verify the basis without taking the tool's word for it.
+const CITATIONS = {
+  ansi:      { label: 'ANSI C84.1 voltage ranges (overview)', url: 'https://voltage-disturbance.com/voltage-quality/voltage-tolerance-standard-ansi-c84-1/' },
+  ieee1547:  { label: 'IEEE 1547-2018 highlights (NREL)', url: 'https://docs.nrel.gov/docs/fy20osti/75436.pdf' },
+  sandia:    { label: 'Sandia SAND2011-8848 — PV output variability from clouds', url: 'https://www.osti.gov/servlets/purl/1031297/' },
+  epri:      { label: 'EPRI 1023090 — cloud-induced PV variability', url: 'https://restservice.epri.com/publicdownload/000000000001023090/0/Product' },
+  eiaHourly: { label: 'EIA — daily electricity demand patterns', url: 'https://www.eia.gov/todayinenergy/detail.php?id=42915' },
+  eiaUse:    { label: 'EIA — household electricity use', url: 'https://www.eia.gov/tools/faqs/faq.php?id=97&t=3' },
+  luthander: { label: 'Luthander et al. 2015 — PV self-consumption in buildings (review)', url: 'https://liu.diva-portal.org/smash/get/diva2:783948/FULLTEXT01' },
+  granger:   { label: 'Granger & Newbold 1974 — spurious regression in trending series', url: 'https://economia.uc3m.es/jgonzalo/teaching/timeseriesMA/spuriousregressiongranger-reading.pdf' },
+  ctCross:   { label: 'Continental Control Systems — CT crosstalk & spacing', url: 'https://ctlsys.com/support/current_transformer_crosstalk/' },
+  enphaseCt: { label: 'Enphase — CT installation guidelines', url: 'https://enphase.com/download/guidelines-current-transformer-ct-installation-tech-brief' },
+};
 
 // ---------- CSV parsing ----------
 function parseCSV(text) {
@@ -871,16 +890,19 @@ function checkVoltageFrequency(points, portalName, gatewayName) {
     if (nearZero.length > 0) {
       findings.push({ type:'issue', headline:`${label} reads near-zero at ${nearZero.length} point(s)`, resolution:'check for a real outage or open breaker on this leg',
         seeing:`${label} drops below 20V at ${nearZero.length} of ${vals.length} points — lowest reading ${Math.min(...nearZero.map(p=>p[key])).toFixed(1)}V. A near-zero voltage reading on a live circuit is far more consistent with that leg actually being de-energized (utility outage, open/tripped breaker, or a disconnected service conductor) than with a sensor calibration issue — sensors that drift typically don't drop all the way to zero.`,
-        recommendation:'<strong>Remote check:</strong> check the gateway\'s live connectivity/voltage reading right now — if normal, this was a real but resolved outage on this leg; note the date range. <strong>If it escalates:</strong> if still near-zero live, this needs a truck roll to check the breaker and service connection for this leg, not a CT/software fix.' });
+        recommendation:'<strong>Remote check:</strong> check the gateway\'s live connectivity/voltage reading right now — if normal, this was a real but resolved outage on this leg; note the date range. <strong>If it escalates:</strong> if still near-zero live, this needs a truck roll to check the breaker and service connection for this leg, not a CT/software fix.',
+        sources: [CITATIONS.ansi] });
     } else if (tooLow.length > 0) {
       findings.push({ type:'issue', headline:`${label} reads unusually low at ${tooLow.length} point(s)`, resolution:'check for a real brownout or a sensor calibration issue',
         seeing:`${label} reads between 20-100V at ${tooLow.length} of ${vals.length} points — lowest reading ${Math.min(...tooLow.map(p=>p[key])).toFixed(1)}V, well below the normal ~114-126V band for a US split-phase leg (ANSI C84.1 Range A; even Range B utilization only extends down to ~104V).`,
-        recommendation:'<strong>Remote check:</strong> compare against the utility\'s reported voltage for this address/area if available — a real brownout would show on their side too. <strong>If it escalates:</strong> if the utility-side voltage is normal, this points to a sensor/CT voltage-sense calibration issue on this leg specifically, worth a site visit to verify.' });
+        recommendation:'<strong>Remote check:</strong> compare against the utility\'s reported voltage for this address/area if available — a real brownout would show on their side too. <strong>If it escalates:</strong> if the utility-side voltage is normal, this points to a sensor/CT voltage-sense calibration issue on this leg specifically, worth a site visit to verify.',
+        sources: [CITATIONS.ansi] });
     }
     if (tooHigh.length > 0) {
       findings.push({ type:'issue', headline:`${label} reads implausibly high at ${tooHigh.length} point(s)`, resolution:'check sensor/CT configuration for this leg',
         seeing:`${label} reads above 135V at ${tooHigh.length} of ${vals.length} points — highest reading ${Math.max(...tooHigh.map(p=>p[key])).toFixed(1)}V, beyond what a healthy US split-phase leg should ever show. This pattern is more consistent with a sensor/voltage-sense configuration error (wrong scale/multiplier, or reading the wrong conductor) than a real utility event — genuine overvoltage events this far out of range are rare and usually trip protective equipment immediately.`,
-        recommendation:`<strong>Remote check:</strong> verify the voltage sense configuration for this leg in the ${portalName} against the ${gatewayName}'s actual hardware/wiring. <strong>If it escalates:</strong> if configuration looks correct, dispatch to verify the physical voltage-sense connection on this leg.` });
+        recommendation:`<strong>Remote check:</strong> verify the voltage sense configuration for this leg in the ${portalName} against the ${gatewayName}'s actual hardware/wiring. <strong>If it escalates:</strong> if configuration looks correct, dispatch to verify the physical voltage-sense connection on this leg.`,
+        sources: [CITATIONS.ansi] });
     }
   };
   if (hasV1) checkLeg('v1', 'Grid Voltage L1');
@@ -892,7 +914,8 @@ function checkVoltageFrequency(points, portalName, gatewayName) {
     if (outOfBand.length > 0) {
       findings.push({ type:'issue', headline:`Grid Frequency out of normal band at ${outOfBand.length} point(s)`, resolution:'check for a real grid event or a frequency sensor fault',
         seeing:`Grid Frequency moves outside the normal 59-61Hz band at ${outOfBand.length} of ${vals.length} points (range seen: ${Math.min(...outOfBand.map(p=>p.freq)).toFixed(2)}-${Math.max(...outOfBand.map(p=>p.freq)).toFixed(2)}Hz). US utility frequency is tightly regulated around 60Hz; a real excursion this large is unusual outside of a genuine grid disturbance (IEEE 1547-2018 requires inverters to ride through roughly 58.5-61.2Hz precisely because excursions beyond ±1Hz are rare, protection-relevant events).`,
-        recommendation:'<strong>Remote check:</strong> check whether this lines up with a known utility event or outage in the area at this date/time. <strong>If it escalates:</strong> if no utility event explains it, this points to a frequency sensor fault rather than a real grid condition — worth a site visit to verify the gateway\'s reading against an independent meter.' });
+        recommendation:'<strong>Remote check:</strong> check whether this lines up with a known utility event or outage in the area at this date/time. <strong>If it escalates:</strong> if no utility event explains it, this points to a frequency sensor fault rather than a real grid condition — worth a site visit to verify the gateway\'s reading against an independent meter.',
+        sources: [CITATIONS.ieee1547] });
     }
   }
 
@@ -901,7 +924,8 @@ function checkVoltageFrequency(points, portalName, gatewayName) {
     return [{ type:'confirmed', headline:`${checked} within normal range`, resolution:'no action needed',
       seeing:`Checked every reading against plausible bounds for a US split-phase service (~100-135V per leg, 59-61Hz — set outside ANSI C84.1's Range B voltage envelope and inside IEEE 1547's frequency ride-through band, so anything flagged is implausible rather than ordinary utility variation) — all values stayed within range.`,
       recommendation:'None.',
-      plainSummary:'The raw voltage and frequency readings themselves look physically normal — this rules out a basic sensor-configuration error on its own.' }];
+      plainSummary:'The raw voltage and frequency readings themselves look physically normal — this rules out a basic sensor-configuration error on its own.',
+      sources: [CITATIONS.ansi, CITATIONS.ieee1547] }];
   }
   return findings;
 }
@@ -1174,7 +1198,8 @@ function runDiagnostic(parsed) {
         resolution:'request a finer-resolution export (15-minute or better)',
         seeing:`Readings in this export are roughly ${Math.round(medianIntervalMinutes)} minutes apart. At that spacing this check cannot tell real sensor cross-talk apart from the ordinary way production and household usage both rise and fall across a day — in either direction. No verdict is drawn from this file.`,
         recommendation:'Request a 15-minute (or finer) export of the same dates and re-run — this check is reliable at that resolution.',
-        plainSummary:'No verdict from this file — the readings are too far apart in time for this test to mean anything. Re-check with a finer-grained export before drawing any conclusion.' });
+        plainSummary:'No verdict from this file — the readings are too far apart in time for this test to mean anything. Re-check with a finer-grained export before drawing any conclusion.',
+        sources: [CITATIONS.granger] });
     } else {
       const overallConcerning = Math.abs(diffR) > 0.6;
       const dayConcerning = worstDay && Math.abs(worstDay.r) > 0.6 && Math.abs(worstDay.r) > Math.abs(diffR) + 0.15;
@@ -1198,7 +1223,8 @@ function runDiagnostic(parsed) {
               ? `Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. The overall figure across the whole export looks fine, but that blends every day together — checked each calendar day individually, and ${worstDay.day} alone (${worstDay.n} points) shows ${worstDay.r.toFixed(2)}, in the same range as a confirmed real cross-talk case. A concentrated multi-day period like this can hide inside a healthy-looking overall average.`
               : 'Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope — and it reads high across this entire export, not just inside one day or window.'),
           recommendation: '<strong>Remote check:</strong> run the CT Health Check on the Consumption meter — if it flags a polarity or branch issue, that\'s a faster, fully remote explanation worth ruling out first.' + (windowConcerning ? ' This already looks at a passing-cloud window specifically, which is the strongest available evidence short of a physical inspection — worth treating this with more confidence than a general overall-correlation flag.' : ' Also worth pulling a second, different day (ideally one with choppy/cloud-broken production) — if Load tracks PV\'s wiggles tightly on that day too, that strengthens the case for real cross-talk rather than coincidence.') + ' <strong>If it escalates:</strong> if the health check is clean and the pattern holds, this needs a truck roll — real CT cross-talk means the Consumption CT is physically picking up the Production conductor\'s field (adjacent-conductor pickup is a documented CT failure mode — Continental Control Systems publishes spacing guidance on exactly this), and it\'s fixed by relocating/separating the CTs, not a software setting.',
-          plainSummary: 'Usage and production are showing up a little too similarly in the data, which usually means two sensors are positioned too close together rather than anything wrong with actual system performance. Typically resolved by repositioning a sensor.' });
+          plainSummary: 'Usage and production are showing up a little too similarly in the data, which usually means two sensors are positioned too close together rather than anything wrong with actual system performance. Typically resolved by repositioning a sensor.',
+          sources: [CITATIONS.ctCross, CITATIONS.enphaseCt, CITATIONS.sandia] });
       } else if (worstWindow && worstWindow.highConfidence) {
         items.push({ type:'confirmed',
           headline: `Production/Load step-change correlation: ${diffR.toFixed(2)} (raw: ${rawR!==null?rawR.toFixed(2):'—'})`,
@@ -1207,21 +1233,24 @@ function runDiagnostic(parsed) {
             + (worstDay ? `; ${worstDay.r.toFixed(2)} on its worst single day (${worstDay.day})` : '')
             + `; ${worstWindow.r.toFixed(2)} during its most volatile window (${escHtml(worstWindow.startTime)} to ${escHtml(worstWindow.endTime)}). Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. This export included a genuinely volatile, cloud-transient-like window, and the reading through it stayed low — that's real evidence of independent measurement, not just an absence of concern.`,
           recommendation: 'None — this is a real clean result, tested against volatile data.',
-          plainSummary: 'Production and usage were tested against a real choppy, cloud-driven stretch and still moved independently — that is a genuine clean result, not just an absence of concern.' });
+          plainSummary: 'Production and usage were tested against a real choppy, cloud-driven stretch and still moved independently — that is a genuine clean result, not just an absence of concern.',
+          sources: [CITATIONS.sandia, CITATIONS.epri] });
       } else if (worstWindow) {
         items.push({ type:'info', inconclusive:true,
           headline: 'Quiet Data Window — Production/Load correlation inconclusive',
           resolution: 're-check with an export from a cloudier day',
           seeing: 'Every window in this export came from calm, clear-sky conditions. On calm days, PV and Load loosely track together on any healthy system, so this result can\'t confirm or rule out a wiring issue.',
           recommendation: 'No action needed on this file alone. To properly test for cross-talk, pull an export from a day with passing clouds — choppy production is what gives this check something to bite into.',
-          plainSummary: 'No issues flagged — but this isn\'t a clearance either. Pull a file from a cloudier day before ruling out cross-talk.' });
+          plainSummary: 'No issues flagged — but this isn\'t a clearance either. Pull a file from a cloudier day before ruling out cross-talk.',
+          sources: [CITATIONS.eiaHourly, CITATIONS.luthander, CITATIONS.granger] });
       } else {
         items.push({ type:'info', inconclusive:true,
           headline: 'Quiet Data Window — Production/Load correlation inconclusive',
           resolution: 'export too short for the window scan — re-check with a longer export',
           seeing: 'This export is too short for the sliding-window scan to run (it needs at least 20 usable readings), and the overall figure alone can\'t separate a healthy system from a wiring issue. This result can\'t confirm or rule out a wiring issue.',
           recommendation: 'Pull a longer export — a full day or more, ideally including some cloud activity — and re-run. The window scan is the strongest part of this check, and it never got to run here.',
-          plainSummary: 'No issues flagged — but this isn\'t a clearance either. The export was too short to properly run this check.' });
+          plainSummary: 'No issues flagged — but this isn\'t a clearance either. The export was too short to properly run this check.',
+          sources: [CITATIONS.granger] });
       }
     }
   }
@@ -1372,7 +1401,8 @@ function runDiagnostic(parsed) {
       resolution: 'informational only — commonly EV charging',
       seeing: `Load held above 4,000W for ${nightLoad.count} consecutive readings between midnight and 5am. Typical always-on baseload is roughly 150-300W (EIA RECS / Pecan Street data), so this is far above idle — but overnight EV charging (commonly 7-11kW) is an entirely ordinary explanation, which is why this is an observation, not an issue. High EVENING readings are never noted here at all — evening is the normal daily peak.`,
       recommendation: 'Nothing to act on unless the homeowner reports unexpectedly high bills AND has no EV, pool pump, or other known overnight load — only then is it worth identifying what draws this much power in the small hours.',
-      plainSummary: 'Something substantial runs in the small hours at this home — most commonly an EV charger. Not a fault indicator; the verdict is unaffected.' });
+      plainSummary: 'Something substantial runs in the small hours at this home — most commonly an EV charger. Not a fault indicator; the verdict is unaffected.',
+      sources: [CITATIONS.eiaUse, CITATIONS.eiaHourly] });
   }
 
   const issues = items.filter(i=>i.type==='issue');
@@ -1561,6 +1591,7 @@ function renderReport(report, parsed, filename) {
       <div class="label">${it.type==='issue' ? 'Recommendation' : 'Info'}</div>
       <p>${it.recommendation}</p>
       ${it.plainSummary ? `<div class="plain-summary"><div class="plain-summary-label${it.type==='confirmed' ? ' assurance' : ''}">${it.type==='confirmed' ? '✅ Assurance' : '💡 Insight'}</div><p>${it.plainSummary}</p></div>` : ''}
+      ${it.sources && it.sources.length ? `<div class="sources">Sources: ${it.sources.map(s => `<a href="${s.url}" target="_blank" rel="noopener noreferrer">${s.label}</a>`).join(' · ')}</div>` : ''}
     </div>`).join('');
 
   resultsEl.style.display = 'block';
