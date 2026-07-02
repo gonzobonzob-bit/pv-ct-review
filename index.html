@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="robots" content="noindex, nofollow">
+<meta name="robots" content="noindex, nofollow, noarchive">
 <title>Lynx — PV CT Data Reviewer</title>
 <style>
   :root{
@@ -234,6 +234,33 @@
 </div>
 
 <script>
+// ============================================================================
+// Lynx diagnostics engine — threshold references (verified against published
+// sources, July 2026):
+//  - Voltage bounds: ANSI C84.1 (120V nominal; Range A service 114-126V,
+//    Range B utilization down to ~104V). The 100/135V flag bounds here sit
+//    outside both ranges — anything flagged is implausible, not ordinary
+//    utility variation.
+//  - Frequency band: IEEE 1547-2018 requires DER ride-through of roughly
+//    58.5-61.2Hz; the 59-61Hz "unusual" band here is conservative inside it.
+//  - Cloud-transient window gate: Sandia SAND2011-8848 / EPRI 1023090
+//    document cloud-induced PV ramps exceeding 50% of array capacity (median
+//    power ramp ~71s) — the basis for the percent-of-capacity volatile-window
+//    threshold in worstWindowCorrelation.
+//  - Residential load context: EIA RECS (~10,500 kWh/yr average, ~1.2kW mean
+//    draw); always-on baseload typically ~150-300W (Pecan Street data);
+//    evening peaks are the daily maximum and ~6-10kW is ordinary — which is
+//    why a high EVENING reading is never flagged, and late-night load is an
+//    info-only observation (overnight EV charging at 7-11kW is common).
+//  - CT adjacent-conductor pickup ("cross-talk") is a documented failure
+//    mode: Continental Control Systems CT crosstalk guidance; Enphase CT
+//    installation tech briefs.
+// ============================================================================
+
+// Escape CSV-derived strings before they reach innerHTML — timestamps and
+// filenames come straight out of user-supplied files.
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
 // ---------- CSV parsing ----------
 function parseCSV(text) {
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM (common in Excel/Enphase exports)
@@ -280,7 +307,6 @@ function detectSchema(headerRow) {
     const battColIdx = norm.findIndex(h => /battery|storage/.test(h) && !h.includes('grid'));
     // SOC column is always present in QCells GraphList headers even when the system has no battery —
     // only flag as battery-equipped if the SOC column actually has non-null values in the data
-    const hasBattery = battColIdx !== -1; // refined below after data rows are available
     return { kind: 'load_with_solar', platform: 'qcells', hasBatteryCol: battColIdx !== -1, pvIdx, gridIdx, loadIdx, v1Idx, v2Idx, freqIdx, battColIdx };
   }
 
@@ -341,6 +367,13 @@ function rowsFromCSV(text) {
   const header = table[0];
   const schema = detectSchema(header);
   if (schema.kind === 'unknown') {
+    // A per-microinverter export IS a supported input — just not on this
+    // tab. Recognize its header fingerprint and point at the right tool
+    // instead of calling it an unsupported format.
+    const normH = header.map(h => h.trim().toLowerCase());
+    if (normH.some(h => h.includes('average real power')) || (normH.some(h => h.includes('dc voltage')) && normH.some(h => h.includes('datetime')))) {
+      return { error: 'This looks like a per-microinverter export (DateTime / Average Real Power / DC telemetry columns). Load it in the Microinverter Compare section below — alongside a second unit\'s export — rather than here in the System CT Review.' };
+    }
     // Distinguish a genuinely empty/comms-error export from a real export
     // in a format this tool does not yet support (e.g. QCells/Q.OMMAND,
     // which has no parser here yet) — these call for different next steps,
@@ -489,6 +522,16 @@ function worstDayCorrelation(points) {
 function worstWindowCorrelation(points, windowSize = 20) {
   const valid = points.filter(p => p.pv !== null && p.load !== null && parseTimeSafe(p.time));
   if (valid.length < windowSize) return null;
+  // Cloud-transient magnitude gate, scaled to the system's own size:
+  // cloud-induced ramps exceeding 50% of array capacity within a minute are
+  // well documented (Sandia SAND2011-8848; EPRI 1023090 — median power ramp
+  // ~71s), so a genuinely choppy window on ANY system shows swings that are
+  // a large fraction of its own peak output. The old fixed 1500W bar
+  // structurally locked small arrays (<~2kW) out of ever reaching high
+  // confidence; 35% of this file's own observed PV peak (500W floor)
+  // scales the gate to the hardware.
+  const pvMaxObserved = Math.max(...valid.map(p => p.pv));
+  const minRangeForConfidence = Math.max(500, 0.35 * pvMaxObserved);
   let worst = null;
   for (let i = 0; i + windowSize <= valid.length; i++) {
     const slice = valid.slice(i, i + windowSize);
@@ -509,7 +552,7 @@ function worstWindowCorrelation(points, windowSize = 20) {
     let pathLength = 0;
     for (let j = 1; j < pv.length; j++) pathLength += Math.abs(pv[j] - pv[j-1]);
     const choppiness = pvRange > 0 ? pathLength / pvRange : 0;
-    const highConfidence = pvRange >= 1500 && choppiness >= 3.0;
+    const highConfidence = pvRange >= minRangeForConfidence && choppiness >= 3.0;
     const load = slice.map(p => p.load);
     const r = differencedCorrelation(pv, load);
     if (r === null) continue;
@@ -680,7 +723,7 @@ function classifyTimelinePosition(result) {
  * two samples, well before that time. Only meaningful when there is a real
  * data point immediately before the gap to compare against — not
  * computable for a gap that starts at the very first row of the export. */
-function classifyDropShape(points, key, runStartTime, sunWindow, substantialW = 500) {
+function classifyDropShape(points, key, runStartTime, substantialW = 500) {
   if (!runStartTime) return null;
   const before = points
     .filter(p => p[key] !== null && p[key] !== undefined)
@@ -716,45 +759,30 @@ function classifyDropShape(points, key, runStartTime, sunWindow, substantialW = 
  * "16 hours is too long for a night" guess breaks at high latitudes in
  * winter (genuinely 18+ hour nights) and doesn't adapt site-to-site; this
  * calibrates the threshold from what this specific system actually does. */
-/** Classifies a time-of-day into a named residential load window based on
- * well-documented US residential consumption patterns (EIA, NREL, WattBuild).
- * Solar homes show a modified version of the classic residential curve:
- * the midday dip (solar offsetting AC load) replaces the typical midday peak,
- * and the evening peak is the dominant high-consumption window.
- *
- * Windows and expected Load ranges for a typical US solar residential system:
- *   LATE NIGHT  12am-5am  : 200-800W  (base load only — fridge, router, etc.)
- *   EARLY MORNING 5am-7am : 400-1500W (some appliances spinning up)
- *   MORNING PEAK 7am-9am  : 800-3500W (water heater, kitchen, HVAC spin-up)
- *   DAYTIME     9am-4pm   : 500-4000W (varies; solar offset makes this lower than non-solar)
- *   EVENING PEAK 4pm-9pm  : 2000-8500W (HVAC, cooking, entertainment, lighting — the dominant daily peak)
- *   NIGHT       9pm-12am  : 500-2500W (winding down — TV, lights, HVAC cooling off)
- *
- * A Load reading is "anomalous" only if it falls well OUTSIDE its window's
- * expected range — not just because it's high, since 7kW at 6pm is completely
- * normal and should never trigger a concern. */
-function classifyTimeOfDay(timeStr) {
-  const t = parseTimeSafe(timeStr);
-  if (!t) return null;
-  const h = t.getHours() + t.getMinutes() / 60;
-  if (h >= 0 && h < 5)   return { window: 'LATE NIGHT',     minW: 200,  maxW: 1200,  concern: h < 0 || h >= 5 };
-  if (h >= 5 && h < 7)   return { window: 'EARLY MORNING',  minW: 300,  maxW: 2000,  concern: false };
-  if (h >= 7 && h < 9)   return { window: 'MORNING PEAK',   minW: 500,  maxW: 4000,  concern: false };
-  if (h >= 9 && h < 16)  return { window: 'DAYTIME',        minW: 300,  maxW: 5000,  concern: false };
-  if (h >= 16 && h < 21) return { window: 'EVENING PEAK',   minW: 1000, maxW: 9000,  concern: false };
-  if (h >= 21 && h < 24) return { window: 'NIGHT',          minW: 300,  maxW: 3000,  concern: false };
-  return null;
-}
-
-/** Returns true only if a Load value is anomalous for its time-of-day window —
- * i.e., well outside what is expected given the time of day, not just high.
- * A 7,000W reading at 6pm is NORMAL (evening peak); the same reading at 3am
- * is anomalous. The threshold adds a 50% buffer above the window ceiling to
- * avoid false-positives from legitimate high-load events (large AC, EV charging). */
-function isLoadAnomalousForTime(load, timeStr) {
-  const tod = classifyTimeOfDay(timeStr);
-  if (!tod || load === null) return false;
-  return load > tod.maxW * 1.5 || (tod.window === 'LATE NIGHT' && load > 2500);
+/** Late-night sustained-load observation — info-only, never an issue, never
+ * affects the verdict. Verified against published data: EIA RECS puts the
+ * average US household at ~10,500 kWh/yr (~1.2kW mean draw) with always-on
+ * baseload typically ~150-300W (Pecan Street); the dominant daily peak is
+ * the EVENING (AC/cooking-driven, ~6-10kW household peaks are ordinary).
+ * Two reasons this stays info-only: (1) a high evening reading is normal by
+ * definition and must never be flagged — confirmed against a real 8,345W
+ * evening peak that is verified-normal demand; (2) overnight EV charging
+ * (commonly 7-11kW) is widespread, so even a large late-night load usually
+ * has an ordinary explanation. This observes; it never flags. */
+function checkSustainedNightLoad(points, { thresholdW = 4000, minConsecutive = 3 } = {}) {
+  let run = 0, curStart = null, curMax = 0;
+  let best = 0, bestStart = null, bestMax = 0;
+  for (const p of points) {
+    const t = parseTimeSafe(p.time);
+    const isNight = t && t.getHours() < 5;
+    if (isNight && p.load !== null && p.load !== undefined && p.load > thresholdW) {
+      if (run === 0) { curStart = p.time; curMax = 0; }
+      run++; curMax = Math.max(curMax, p.load);
+      if (run > best) { best = run; bestStart = curStart; bestMax = curMax; }
+    } else run = 0;
+  }
+  if (best < minConsecutive) return null;
+  return { count: best, startTime: bestStart, maxW: bestMax };
 }
 
 function computeSunWindow(points, key, threshold = 50) {
@@ -827,7 +855,7 @@ function checkFlatline(points, key, { toleranceW = 5, minHours = 3, minPoints = 
  * fault) from implausibly high (more consistent with a sensor/CT
  * configuration error) from out-of-band frequency (a grid event or a
  * frequency sensor fault), since these point to different root causes. */
-function checkVoltageFrequency(points) {
+function checkVoltageFrequency(points, portalName, gatewayName) {
   const findings = [];
   const hasV1 = points.some(p => p.v1 !== null && p.v1 !== undefined);
   const hasV2 = points.some(p => p.v2 !== null && p.v2 !== undefined);
@@ -846,7 +874,7 @@ function checkVoltageFrequency(points) {
         recommendation:'<strong>Remote check:</strong> check the gateway\'s live connectivity/voltage reading right now — if normal, this was a real but resolved outage on this leg; note the date range. <strong>If it escalates:</strong> if still near-zero live, this needs a truck roll to check the breaker and service connection for this leg, not a CT/software fix.' });
     } else if (tooLow.length > 0) {
       findings.push({ type:'issue', headline:`${label} reads unusually low at ${tooLow.length} point(s)`, resolution:'check for a real brownout or a sensor calibration issue',
-        seeing:`${label} reads between 20-100V at ${tooLow.length} of ${vals.length} points — lowest reading ${Math.min(...tooLow.map(p=>p[key])).toFixed(1)}V, well below the normal ~114-126V utilization range for a US split-phase leg.`,
+        seeing:`${label} reads between 20-100V at ${tooLow.length} of ${vals.length} points — lowest reading ${Math.min(...tooLow.map(p=>p[key])).toFixed(1)}V, well below the normal ~114-126V band for a US split-phase leg (ANSI C84.1 Range A; even Range B utilization only extends down to ~104V).`,
         recommendation:'<strong>Remote check:</strong> compare against the utility\'s reported voltage for this address/area if available — a real brownout would show on their side too. <strong>If it escalates:</strong> if the utility-side voltage is normal, this points to a sensor/CT voltage-sense calibration issue on this leg specifically, worth a site visit to verify.' });
     }
     if (tooHigh.length > 0) {
@@ -863,7 +891,7 @@ function checkVoltageFrequency(points) {
     const outOfBand = vals.filter(p => p.freq < 59.0 || p.freq > 61.0);
     if (outOfBand.length > 0) {
       findings.push({ type:'issue', headline:`Grid Frequency out of normal band at ${outOfBand.length} point(s)`, resolution:'check for a real grid event or a frequency sensor fault',
-        seeing:`Grid Frequency moves outside the normal 59-61Hz band at ${outOfBand.length} of ${vals.length} points (range seen: ${Math.min(...outOfBand.map(p=>p.freq)).toFixed(2)}-${Math.max(...outOfBand.map(p=>p.freq)).toFixed(2)}Hz). US utility frequency is tightly regulated around 60Hz; a real excursion this large is unusual outside of a genuine grid disturbance.`,
+        seeing:`Grid Frequency moves outside the normal 59-61Hz band at ${outOfBand.length} of ${vals.length} points (range seen: ${Math.min(...outOfBand.map(p=>p.freq)).toFixed(2)}-${Math.max(...outOfBand.map(p=>p.freq)).toFixed(2)}Hz). US utility frequency is tightly regulated around 60Hz; a real excursion this large is unusual outside of a genuine grid disturbance (IEEE 1547-2018 requires inverters to ride through roughly 58.5-61.2Hz precisely because excursions beyond ±1Hz are rare, protection-relevant events).`,
         recommendation:'<strong>Remote check:</strong> check whether this lines up with a known utility event or outage in the area at this date/time. <strong>If it escalates:</strong> if no utility event explains it, this points to a frequency sensor fault rather than a real grid condition — worth a site visit to verify the gateway\'s reading against an independent meter.' });
     }
   }
@@ -871,7 +899,7 @@ function checkVoltageFrequency(points) {
   if (findings.length === 0) {
     const checked = [hasV1 && 'Grid Voltage L1', hasV2 && 'Grid Voltage L2', hasFreq && 'Grid Frequency'].filter(Boolean).join(', ');
     return [{ type:'confirmed', headline:`${checked} within normal range`, resolution:'no action needed',
-      seeing:`Checked every reading against plausible bounds for a US split-phase service (~100-135V per leg, 59-61Hz) — all values stayed within range.`,
+      seeing:`Checked every reading against plausible bounds for a US split-phase service (~100-135V per leg, 59-61Hz — set outside ANSI C84.1's Range B voltage envelope and inside IEEE 1547's frequency ride-through band, so anything flagged is implausible rather than ordinary utility variation) — all values stayed within range.`,
       recommendation:'None.',
       plainSummary:'The raw voltage and frequency readings themselves look physically normal — this rules out a basic sensor-configuration error on its own.' }];
   }
@@ -882,7 +910,10 @@ function checkPerDayProductionAnomaly(points, key, minTypicalPeak = 500, ratioTh
   const byDay = {};
   for (const p of points) {
     const t = parseTimeSafe(p.time);
-    const dayKey = t ? t.toISOString().slice(0,10) : (p.time || '').slice(0,10);
+    // Local-date keying, matching worstDayCorrelation/worstDayLegBalance —
+    // toISOString() keyed by UTC, which shifted evening points into the next
+    // day and could mislabel which date actually under-produced.
+    const dayKey = t ? `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}` : (p.time || '').slice(0,10);
     if (!dayKey) continue;
     (byDay[dayKey] ||= []).push(p[key]);
   }
@@ -979,7 +1010,7 @@ function runDiagnostic(parsed) {
   } else if (mode === 'tesla_derived') {
     items.push({ type:'info', headline:'Load is derived, not independently measured', resolution:'no separate Load CT to check',
       seeing:'On this export, Load = Solar + Site (+ Battery) exactly — confirmed by checking the numbers directly. Tesla systems typically have no separate Load CT; Load is calculated from the other three.',
-      recommendation:'This is expected behavior, not a fault — it reflects how the architecture works. A reported issue with Load on a Tesla system should be directed to the Solar or Site/Battery CTs; there is typically no separate Load CT to investigate.' });
+      recommendation:'This is expected behavior, not a fault — it reflects how the architecture works. A reported issue with Load on a Tesla system should be directed to the Solar or Site/Battery CTs; there is typically no separate Load CT to investigate. For the same reason, the PV/Load cross-talk check is intentionally not run on this export — a derived Load tracks PV by construction, so that correlation would test arithmetic, not wiring.' });
   } else if (mode === 'whole_system_battery') {
     items.push({ type:'info', headline:'No Grid trace in this export — and Produced/Consumed will not balance directly', resolution:'balance check unavailable; battery flow accounted for separately',
       seeing: 'This export has whole-system Produced/Consumed totals plus Battery Charge/Discharge, but no separate Grid column. With a battery present, Produced will not simply equal Consumed — energy can flow into storage (Charge) or out of it to supply Load (Discharge) instead of moving directly between production and the house.',
@@ -1101,61 +1132,97 @@ function runDiagnostic(parsed) {
   })();
   const coarseData = medianIntervalMinutes !== null && medianIntervalMinutes >= 45;
 
+  // ---------- PV/Load cross-talk (differenced correlation) ----------
+  // Standing rule: this check must never be silently absent. Every path
+  // below either produces a real verdict or an explicit "could not run /
+  // inconclusive" item — a missing section can never be mistaken for a
+  // clean result.
   const pv = points.map(p=>p.pv), load = points.map(p=>p.load).filter(v=>v!==null);
-  if (mode !== 'tesla_derived' && load.length === points.length && points.length >= 6) {
+  if (mode === 'tesla_derived') {
+    // Intentionally not run — Load is derived (Solar + Site + Battery), so a
+    // PV/Load correlation would test arithmetic, not wiring. The derived-Load
+    // info item above states this explicitly in its recommendation.
+  } else if (load.length !== points.length || points.length < 6) {
+    items.push({ type:'info', inconclusive:true,
+      headline:'Cross-talk check could not run',
+      resolution:'not enough complete PV+Load rows',
+      seeing:`This check needs at least 6 rows with PV and Load both present; this export parsed ${load.length} complete row(s) of ${points.length}. No correlation was computed — a data-availability limit, not a clean result.`,
+      recommendation:'Re-export with a wider date range (or confirm the export includes PV and Load values on the same rows), then re-run.',
+      plainSummary:'Not enough usable data to test for sensor cross-talk — the check was skipped, not passed.' });
+  } else {
     const rawR = pearson(pv, load);
     const diffR = differencedCorrelation(pv, load);
     const worstDay = worstDayCorrelation(points);
-    if (diffR !== null) {
+    const worstWindow = worstWindowCorrelation(points);
+
+    if (diffR === null) {
+      items.push({ type:'info', inconclusive:true,
+        headline:'Cross-talk check could not be computed',
+        resolution:'no usable variation in this export',
+        seeing:'The correlation math needs step-to-step variation in both PV and Load; this export\'s values did not vary enough to compute it. No verdict was produced — this is not a clean result.',
+        recommendation:'Pull a longer or busier export (a normal day of real household activity) and re-run.',
+        plainSummary:'Not enough movement in the data to run the cross-talk test — skipped, not passed.' });
+    } else if (coarseData) {
+      // Coarse sampling breaks this check in BOTH directions — a controlled
+      // real-data comparison read 0.41 (clean) at native 15-minute resolution
+      // and 0.90 (flagged territory) when the same healthy day was
+      // downsampled to hourly. A clean coarse reading is exactly as
+      // untrustworthy as a flagged one, so coarse data is always reported as
+      // inconclusive — never confirmed clean, never flagged, never silent.
+      items.push({ type:'info', inconclusive:true,
+        headline:'Sampling Too Coarse — Production/Load correlation inconclusive',
+        resolution:'request a finer-resolution export (15-minute or better)',
+        seeing:`Readings in this export are roughly ${Math.round(medianIntervalMinutes)} minutes apart. At that spacing this check cannot tell real sensor cross-talk apart from the ordinary way production and household usage both rise and fall across a day — in either direction. No verdict is drawn from this file.`,
+        recommendation:'Request a 15-minute (or finer) export of the same dates and re-run — this check is reliable at that resolution.',
+        plainSummary:'No verdict from this file — the readings are too far apart in time for this test to mean anything. Re-check with a finer-grained export before drawing any conclusion.' });
+    } else {
       const overallConcerning = Math.abs(diffR) > 0.6;
       const dayConcerning = worstDay && Math.abs(worstDay.r) > 0.6 && Math.abs(worstDay.r) > Math.abs(diffR) + 0.15;
-      const worstWindow = worstWindowCorrelation(points);
-      // The window number is now always computed and always shown — it is
-      // never withheld. Only a HIGH-CONFIDENCE window (genuine cloud-
-      // transient choppiness, not just a calm or smoothly-ramping stretch)
-      // can trigger a concerning verdict on its own; a low-confidence
-      // reading is reported with the same transparency but flagged as
-      // exactly that — low confidence — rather than silently absorbed into
-      // either a clean "confirmed" or hidden from the report entirely.
       const windowConcerning = worstWindow && worstWindow.highConfidence && Math.abs(worstWindow.r) > 0.85;
-      const rawConcerning = overallConcerning || dayConcerning || windowConcerning;
-      const concerning = rawConcerning && !coarseData;
-      const lowConfidence = rawConcerning && coarseData;
-      const verdictType = concerning ? 'issue' : (lowConfidence ? 'info' : (worstWindow && worstWindow.highConfidence ? 'confirmed' : 'info'));
+      const concerning = overallConcerning || dayConcerning || windowConcerning;
 
-      const numbersLine = `Measured: ${diffR.toFixed(2)} overall across the full export (raw, undifferenced: ${rawR!==null?rawR.toFixed(2):'—'})`
-        + (worstDay ? `; ${worstDay.r.toFixed(2)} on its worst single day (${worstDay.day})` : '')
-        + (worstWindow ? `; ${worstWindow.r.toFixed(2)} during its strongest window (${worstWindow.startTime} to ${worstWindow.endTime}, ${worstWindow.highConfidence ? 'genuine cloud-transient activity — high confidence' : 'calm/smooth period — low confidence'})` : '');
-
-      items.push({ type: verdictType,
-        headline: (lowConfidence ? '[LOW CONFIDENCE — coarse interval] ' : '') + (worstWindow && !worstWindow.highConfidence && !overallConcerning && !dayConcerning ? '[CALM WINDOW ONLY — low confidence] ' : '') + (windowConcerning
-          ? `Production/Load step-change correlation: ${diffR.toFixed(2)} overall, but ${worstWindow.r.toFixed(2)} during a volatile window on ${worstWindow.startTime.split('(')[0].trim()}`
-          : dayConcerning
-            ? `Production/Load step-change correlation: ${diffR.toFixed(2)} overall, but ${worstDay.r.toFixed(2)} on ${worstDay.day}`
-            : `Production/Load step-change correlation: ${diffR.toFixed(2)} (raw: ${rawR!==null?rawR.toFixed(2):'—'})`),
-        resolution: lowConfidence ? 'request a finer-resolution export before concluding anything' : (concerning ? 'investigate possible CT cross-talk' : (worstWindow && worstWindow.highConfidence ? 'tested against a real volatile window — no cross-talk indicated' : 'only calm-period data available — this data cannot confirm independence either way')),
-        seeing: numbersLine + '. ' + (windowConcerning
-          ? `Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. The overall and per-day figures can look fine while still hiding a real signal inside a shorter, more volatile stretch — scanned every window in the data for the strongest correlation, prioritizing genuinely cloud-transient-like stretches (the kind of period where an independent Load has no ordinary reason to track PV's swings) over calm ones, and found ${worstWindow.startTime} to ${worstWindow.endTime} (${worstWindow.n} points, PV swung ${worstWindow.pvRange.toFixed(0)}W in that stretch) reading ${worstWindow.r.toFixed(2)} — there's no plausible reason an independent household load would mirror a fast solar swing from passing clouds within the same 15 minutes, which makes a volatile-window match like this more diagnostic than a calm-period match would be.`
-          : dayConcerning
-            ? `Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. The overall figure across the whole export looks fine, but that blends every day together — checked each calendar day individually, and ${worstDay.day} alone (${worstDay.n} points) shows ${worstDay.r.toFixed(2)}, in the same range as a confirmed real cross-talk case. A concentrated multi-day period like this can hide inside a healthy-looking overall average.`
-            : (worstWindow && worstWindow.highConfidence)
-              ? 'Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. This export did include a genuinely volatile, cloud-transient-like window, and the reading through it stayed low — that\'s real evidence of independent measurement, not just an absence of concern.'
-              : 'Every window in this export was scanned, and the strongest correlation found anywhere came from a calm or smoothly-changing stretch, not a genuine cloud-transient one. On a calm day, PV and Load will loosely track each other on ANY healthy system just from the shared daily shape, so this reading is shown for completeness but should be treated as low-confidence — not a confirmed-independent result.')
-          + (lowConfidence ? ` This export's sampling interval is roughly ${Math.round(medianIntervalMinutes)} minutes between points. At that resolution, this check has been confirmed unreliable: a controlled comparison on a known-healthy day showed a clean 0.41 reading at native 15-minute resolution, but 0.90 — squarely in flagged territory — once that same data was downsampled to hourly. The differencing at this interval isn't fine-grained enough to separate real cross-talk from the ordinary fact that PV and Load both naturally rise and fall together over a day; this reading should not be treated as a real finding on its own.` : ''),
-        recommendation: lowConfidence
-          ? 'This export\'s sampling interval is too coarse for this specific check to be trustworthy — it is not evidence of cross-talk on its own. If a finer-resolution export of the same period is available (15-minute or better), re-run the comparison on that instead before drawing any conclusion.'
-          : (concerning
-            ? '<strong>Remote check:</strong> run the CT Health Check on the Consumption meter — if it flags a polarity or branch issue, that\'s a faster, fully remote explanation worth ruling out first.' + (windowConcerning ? ' This already looks at a passing-cloud window specifically, which is the strongest available evidence short of a physical inspection — worth treating this with more confidence than a general overall-correlation flag.' : ' Also worth pulling a second, different day (ideally one with choppy/cloud-broken production) — if Load tracks PV\'s wiggles tightly on that day too, that strengthens the case for real cross-talk rather than coincidence.') + ' <strong>If it escalates:</strong> if the health check is clean and the pattern holds, this needs a truck roll — genuine CT cross-talk means the Consumption CT is physically picking up the Production conductor\'s field, which is fixed by relocating/separating the CTs, not a software setting.'
-            : (worstWindow && worstWindow.highConfidence
-              ? 'None — this is a genuine clean result, tested against real volatile data.'
-              : 'Not a finding on its own, but also not a clearance — pull a different date with more cloud activity (or more days, to increase the chance of catching a volatile stretch) before treating this site as confirmed independent. A run of clear-sky days will always read clean here regardless of whether a real wiring issue exists.')),
-        plainSummary: lowConfidence
-          ? 'This finding can\'t be trusted as-is — the data points are too far apart in time for this specific check to tell real cross-talk apart from the normal fact that production and usage both rise and fall over the course of a day. Worth re-checking with more frequent data before acting on it.'
-          : (concerning
-            ? 'Usage and production are showing up a little too similarly in the data, which usually means two sensors are positioned too close together rather than anything wrong with actual system performance. Typically resolved by repositioning a sensor.'
-            : (worstWindow && worstWindow.highConfidence
-              ? 'Production and usage were tested against a real choppy, cloud-driven stretch and still moved independently — that is a genuine clean result, not just an absence of concern.'
-              : 'This export never had a choppy enough stretch of weather to really test this — the number shown is real, but it came from a calm period, so it does not confirm independence. Worth re-checking on a cloudier day before ruling this out.')) });
+      if (concerning) {
+        const numbersLine = `Measured: ${diffR.toFixed(2)} overall across the full export (raw, undifferenced: ${rawR!==null?rawR.toFixed(2):'—'})`
+          + (worstDay ? `; ${worstDay.r.toFixed(2)} on its worst single day (${worstDay.day})` : '')
+          + (worstWindow ? `; ${worstWindow.r.toFixed(2)} during its strongest window (${escHtml(worstWindow.startTime)} to ${escHtml(worstWindow.endTime)}, ${worstWindow.highConfidence ? 'genuine cloud-transient activity — high confidence' : 'calm/smooth period — low confidence'})` : '');
+        items.push({ type:'issue',
+          headline: windowConcerning
+            ? `Production/Load step-change correlation: ${diffR.toFixed(2)} overall, but ${worstWindow.r.toFixed(2)} during a volatile window on ${escHtml(worstWindow.startTime.split('(')[0].trim())}`
+            : dayConcerning
+              ? `Production/Load step-change correlation: ${diffR.toFixed(2)} overall, but ${worstDay.r.toFixed(2)} on ${worstDay.day}`
+              : `Production/Load step-change correlation: ${diffR.toFixed(2)} (raw: ${rawR!==null?rawR.toFixed(2):'—'})`,
+          resolution: 'investigate possible CT cross-talk',
+          seeing: numbersLine + '. ' + (windowConcerning
+            ? `Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. The overall and per-day figures can look fine while still hiding a real signal inside a shorter, more volatile stretch — scanned every window in the data for the strongest correlation, prioritizing cloud-transient-like stretches (the kind of period where an independent Load has no ordinary reason to track PV's swings) over calm ones, and found ${escHtml(worstWindow.startTime)} to ${escHtml(worstWindow.endTime)} (${worstWindow.n} points, PV swung ${worstWindow.pvRange.toFixed(0)}W in that stretch) reading ${worstWindow.r.toFixed(2)} — there's no plausible reason an independent household load would mirror a fast solar swing from passing clouds within the same 15 minutes, which makes a volatile-window match like this more diagnostic than a calm-period match would be.`
+            : dayConcerning
+              ? `Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. The overall figure across the whole export looks fine, but that blends every day together — checked each calendar day individually, and ${worstDay.day} alone (${worstDay.n} points) shows ${worstDay.r.toFixed(2)}, in the same range as a confirmed real cross-talk case. A concentrated multi-day period like this can hide inside a healthy-looking overall average.`
+              : 'Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope — and it reads high across this entire export, not just inside one day or window.'),
+          recommendation: '<strong>Remote check:</strong> run the CT Health Check on the Consumption meter — if it flags a polarity or branch issue, that\'s a faster, fully remote explanation worth ruling out first.' + (windowConcerning ? ' This already looks at a passing-cloud window specifically, which is the strongest available evidence short of a physical inspection — worth treating this with more confidence than a general overall-correlation flag.' : ' Also worth pulling a second, different day (ideally one with choppy/cloud-broken production) — if Load tracks PV\'s wiggles tightly on that day too, that strengthens the case for real cross-talk rather than coincidence.') + ' <strong>If it escalates:</strong> if the health check is clean and the pattern holds, this needs a truck roll — real CT cross-talk means the Consumption CT is physically picking up the Production conductor\'s field (adjacent-conductor pickup is a documented CT failure mode — Continental Control Systems publishes spacing guidance on exactly this), and it\'s fixed by relocating/separating the CTs, not a software setting.',
+          plainSummary: 'Usage and production are showing up a little too similarly in the data, which usually means two sensors are positioned too close together rather than anything wrong with actual system performance. Typically resolved by repositioning a sensor.' });
+      } else if (worstWindow && worstWindow.highConfidence) {
+        items.push({ type:'confirmed',
+          headline: `Production/Load step-change correlation: ${diffR.toFixed(2)} (raw: ${rawR!==null?rawR.toFixed(2):'—'})`,
+          resolution: 'tested against a real volatile window — no cross-talk indicated',
+          seeing: `Measured: ${diffR.toFixed(2)} overall across the full export`
+            + (worstDay ? `; ${worstDay.r.toFixed(2)} on its worst single day (${worstDay.day})` : '')
+            + `; ${worstWindow.r.toFixed(2)} during its most volatile window (${escHtml(worstWindow.startTime)} to ${escHtml(worstWindow.endTime)}). Step-to-step change correlation isolates whether fine wiggles move together, independent of any shared daily envelope. This export included a genuinely volatile, cloud-transient-like window, and the reading through it stayed low — that's real evidence of independent measurement, not just an absence of concern.`,
+          recommendation: 'None — this is a real clean result, tested against volatile data.',
+          plainSummary: 'Production and usage were tested against a real choppy, cloud-driven stretch and still moved independently — that is a genuine clean result, not just an absence of concern.' });
+      } else if (worstWindow) {
+        items.push({ type:'info', inconclusive:true,
+          headline: 'Quiet Data Window — Production/Load correlation inconclusive',
+          resolution: 're-check with an export from a cloudier day',
+          seeing: 'Every window in this export came from calm, clear-sky conditions. On calm days, PV and Load loosely track together on any healthy system, so this result can\'t confirm or rule out a wiring issue.',
+          recommendation: 'No action needed on this file alone. To properly test for cross-talk, pull an export from a day with passing clouds — choppy production is what gives this check something to bite into.',
+          plainSummary: 'No issues flagged — but this isn\'t a clearance either. Pull a file from a cloudier day before ruling out cross-talk.' });
+      } else {
+        items.push({ type:'info', inconclusive:true,
+          headline: 'Quiet Data Window — Production/Load correlation inconclusive',
+          resolution: 'export too short for the window scan — re-check with a longer export',
+          seeing: 'This export is too short for the sliding-window scan to run (it needs at least 20 usable readings), and the overall figure alone can\'t separate a healthy system from a wiring issue. This result can\'t confirm or rule out a wiring issue.',
+          recommendation: 'Pull a longer export — a full day or more, ideally including some cloud activity — and re-run. The window scan is the strongest part of this check, and it never got to run here.',
+          plainSummary: 'No issues flagged — but this isn\'t a clearance either. The export was too short to properly run this check.' });
+      }
     }
   }
 
@@ -1166,7 +1233,7 @@ function runDiagnostic(parsed) {
   // regardless of whether the duration check itself flagged it.
   const pvFlatResult = flatResults.find(fc => fc.key === 'pv');
   const pvDropShape = (pvFlatResult && !wholeSystemOffline)
-    ? classifyDropShape(points, 'pv', pvFlatResult.result.startTime, pvSunWindow)
+    ? classifyDropShape(points, 'pv', pvFlatResult.result.startTime)
     : null;
   const suddenCutoffDetected = !!(pvDropShape && pvDropShape.abrupt) && !flaggedFlats.some(f => f.key !== 'pv');
 
@@ -1295,13 +1362,36 @@ function runDiagnostic(parsed) {
   }
 
 
-  const vfFindings = checkVoltageFrequency(points);
+  const vfFindings = checkVoltageFrequency(points, portalName, gatewayName);
   if (vfFindings) items.push(...vfFindings);
 
+  const nightLoad = checkSustainedNightLoad(points);
+  if (nightLoad) {
+    items.push({ type:'info',
+      headline: `Sustained late-night consumption (~${Math.round(nightLoad.maxW)}W peak) starting ${escHtml(nightLoad.startTime)}`,
+      resolution: 'informational only — commonly EV charging',
+      seeing: `Load held above 4,000W for ${nightLoad.count} consecutive readings between midnight and 5am. Typical always-on baseload is roughly 150-300W (EIA RECS / Pecan Street data), so this is far above idle — but overnight EV charging (commonly 7-11kW) is an entirely ordinary explanation, which is why this is an observation, not an issue. High EVENING readings are never noted here at all — evening is the normal daily peak.`,
+      recommendation: 'Nothing to act on unless the homeowner reports unexpectedly high bills AND has no EV, pool pump, or other known overnight load — only then is it worth identifying what draws this much power in the small hours.',
+      plainSummary: 'Something substantial runs in the small hours at this home — most commonly an EV charger. Not a fault indicator; the verdict is unaffected.' });
+  }
+
   const issues = items.filter(i=>i.type==='issue');
+  const inconclusive = items.filter(i=>i.inconclusive);
+  let incLabel = '';
+  if (inconclusive.length === 1) {
+    const h = inconclusive[0].headline;
+    const label = h.indexOf('Quiet Data Window') === 0 ? 'quiet data window'
+      : h.indexOf('Sampling Too Coarse') === 0 ? 'sampling too coarse'
+      : 'could not run';
+    incLabel = `1 check inconclusive (${label})`;
+  } else if (inconclusive.length > 1) {
+    incLabel = `${inconclusive.length} checks inconclusive`;
+  }
   return {
     status: issues.length>0 ? 'TROUBLESHOOT' : 'GOOD',
-    summary: issues.length>0 ? `${issues.length} issue(s) flagged, ${items.length-issues.length} other item(s)` : 'No issues flagged',
+    summary: issues.length>0
+      ? `${issues.length} issue(s) flagged, ${items.length-issues.length} other item(s)`
+      : (incLabel ? `No issues flagged — ${incLabel}` : 'No issues flagged'),
     items
   };
 }
@@ -1484,49 +1574,9 @@ function resetTool() {
 }
 </script>
 <script>
-// ---------- CSV parsing (shared logic) ----------
-function parseCSV(text) {
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') { if (text[i+1] === '"') { field += '"'; i++; } else { inQuotes = false; } }
-      else field += c;
-    } else {
-      if (c === '"') inQuotes = true;
-      else if (c === ',') { row.push(field); field = ''; }
-      else if (c === '\n' || c === '\r') {
-        if (c === '\r' && text[i+1] === '\n') i++;
-        row.push(field); field = ''; rows.push(row); row = [];
-      } else field += c;
-    }
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  return rows.filter(r => r.some(c => c.trim() !== ''));
-}
-
-// Mirrors diagnostics.js's parseTimeSafe — GraphList-style "Mon D, YYYY
-// (HH:MM)" timestamps silently parse to midnight under native Date(), which
-// would corrupt every time-of-day calculation in this file the same way it
-// did in diagnostics.js before that was caught and fixed. Real microinverter
-// exports seen so far use plain ISO timestamps (where native Date() is
-// fine), but this format isn't guaranteed, so parse defensively rather than
-// rely on that holding.
-function parseTimeSafe(str) {
-  if (!str) return null;
-  const m = str.match(/^([A-Za-z]{3}\s+\d{1,2},\s*\d{4})\s*\((\d{1,2}):(\d{2})\)/);
-  if (m) {
-    const datePart = new Date(m[1]);
-    if (!isNaN(datePart.getTime())) {
-      datePart.setHours(parseInt(m[2],10), parseInt(m[3],10), 0, 0);
-      return datePart;
-    }
-  }
-  const d = new Date(str);
-  return isNaN(d.getTime()) ? null : d;
-}
+// parseCSV and parseTimeSafe are defined once in diagnostics.js and shared
+// globally — the duplicate copies that used to live here were removed so a
+// fix in one place can no longer silently diverge from the other.
 
 // NOTE: this tool reads a single microinverter's own internal telemetry
 // (its own DC and AC sensors, reporting on its own module). There is no CT
@@ -1595,16 +1645,17 @@ function worstDayRatio(powerA, powerB) {
   const byDay = new Map();
   for (const p of powerA) {
     const k = dayKey(p.t);
-    if (!byDay.has(k)) byDay.set(k, { a: 0, b: 0 });
-    byDay.get(k).a += p.value;
+    if (!byDay.has(k)) byDay.set(k, { a: 0, b: 0, na: 0, nb: 0 });
+    byDay.get(k).a += p.value; byDay.get(k).na++;
   }
   for (const p of powerB) {
     const k = dayKey(p.t);
-    if (!byDay.has(k)) byDay.set(k, { a: 0, b: 0 });
-    byDay.get(k).b += p.value;
+    if (!byDay.has(k)) byDay.set(k, { a: 0, b: 0, na: 0, nb: 0 });
+    byDay.get(k).b += p.value; byDay.get(k).nb++;
   }
   let worst = null;
-  for (const [day, { a, b }] of byDay) {
+  for (const [day, { a, b, na, nb }] of byDay) {
+    if (na === 0 || nb === 0) continue; // day covered by only ONE file — a date-range gap, not a production gap; comparing against an absent day would fabricate a huge ratio
     if (a < 50 && b < 50) continue; // skip days with essentially no production from either — not informative
     const ratio = Math.max(a, b) / (Math.min(a, b) || 0.001);
     if (!worst || ratio > worst.ratio) worst = { day, ratio, a, b };
@@ -1669,14 +1720,18 @@ function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Invert
   const morning = table.filter(r => r.tod < peakTod);
   const afternoon = table.filter(r => r.tod >= peakTod);
   const halfRatio = (rows, lk) => {
+    if (rows.length === 0) return null; // an empty half (e.g. an afternoon-only export) can't be compared — treating it as 0 fabricated a false directional gap
     const hk = lk === 'a' ? 'b' : 'a';
     const lo = rows.reduce((s,r)=>s+r[lk],0), hi = rows.reduce((s,r)=>s+r[hk],0);
+    if (lo <= 0 && hi <= 0) return null;
     return hi / (lo || 0.001);
   };
   const morningRatio = halfRatio(morning, lowerKey), afternoonRatio = halfRatio(afternoon, lowerKey);
   let gapHalf = 'uniform';
-  if (morningRatio > afternoonRatio * 1.5) gapHalf = 'morning';
-  else if (afternoonRatio > morningRatio * 1.5) gapHalf = 'afternoon';
+  if (morningRatio !== null && afternoonRatio !== null) {
+    if (morningRatio > afternoonRatio * 1.5) gapHalf = 'morning';
+    else if (afternoonRatio > morningRatio * 1.5) gapHalf = 'afternoon';
+  }
 
   const meaningfulGap = overallRatio >= 1.15;
   const worstDay = worstDayRatio(dataA.power, dataB.power);
@@ -1826,6 +1881,8 @@ function compareMicroinverters(dataA, dataB, labelA='Inverter A', labelB='Invert
 
   return { lowerLabel, higherLabel, overallRatio, gapHalf, peakTod, morningRatio, afternoonRatio, dc, ac, findings, table };
 }
+</script>
+<script>
 let microFileA = null, microFileB = null;
 document.getElementById('micro-file-a').addEventListener('change', (e) => {
   if (e.target.files[0]) { microFileA = e.target.files[0]; document.getElementById('micro-filename-a').textContent = microFileA.name; }
@@ -1873,7 +1930,7 @@ async function runMicroCompare() {
     if (dataA.error) { errorBox.textContent = 'Inverter A: ' + dataA.error; errorBox.style.display = 'block'; return; }
     if (dataB.error) { errorBox.textContent = 'Inverter B: ' + dataB.error; errorBox.style.display = 'block'; return; }
 
-    const result = compareMicroinverters(dataA, dataB, microFileA.name, microFileB.name);
+    const result = compareMicroinverters(dataA, dataB, escHtml(microFileA.name), escHtml(microFileB.name));
     if (result.error) { errorBox.textContent = result.error; errorBox.style.display = 'block'; return; }
     renderMicroResult(result);
   } catch (err) {
