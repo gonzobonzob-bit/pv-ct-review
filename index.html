@@ -74,6 +74,23 @@
   .ex-row{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
   .ex-blurb{color:var(--muted); font-size:12px; margin-top:8px; line-height:1.5;}
   .meta-prov{background:var(--card-alt); border:none; border-radius:8px; padding:8px 14px; margin-bottom:14px; color:var(--muted); font-size:11.5px; line-height:1.6;}
+  #chart-zoom-reset{position:absolute; top:10px; right:12px; font-family:var(--sans); font-size:11px; font-weight:700; padding:4px 10px; border-radius:5px; border:1px solid var(--line); background:var(--card); color:var(--muted); cursor:pointer; z-index:5;}
+  #chart-zoom-reset:hover{color:var(--ink); border-color:var(--muted);}
+  #chart-popup{position:absolute; z-index:10; width:290px; max-width:80%; background:var(--card); border:1px solid var(--line); border-left:4px solid var(--red); border-radius:8px; padding:12px 14px; box-shadow:0 10px 30px rgba(0,0,0,.5); font-size:12px;}
+  #chart-popup .pop-tag{font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; font-family:var(--mono);}
+  #chart-popup .pop-tag.issue{color:var(--red);}
+  #chart-popup .pop-tag.info{color:var(--amber);}
+  #chart-popup .pop-headline{font-weight:700; margin-top:5px; color:var(--ink); line-height:1.4;}
+  #chart-popup .pop-measured{font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--bg); border-radius:4px; padding:5px 8px; margin-top:7px; line-height:1.5;}
+  #chart-popup .pop-lookfor{color:var(--muted); margin-top:7px; line-height:1.5; font-style:italic;}
+  #chart-popup .pop-actions{display:flex; gap:12px; flex-wrap:wrap; margin-top:10px;}
+  #chart-popup .pop-actions a{color:var(--orange); font-size:11.5px; font-weight:700; text-decoration:none;}
+  #chart-popup .pop-actions a:hover{text-decoration:underline;}
+  #chart-svg-container rect[data-hl]{cursor:pointer;}
+  #chart-svg-container rect[data-hl]:hover{opacity:.2;}
+  .show-chart-row{margin:2px 0 6px;}
+  .show-chart{font-size:11.5px; font-weight:700; color:var(--orange); text-decoration:none;}
+  .show-chart:hover{text-decoration:underline;}
   .error-box{background:var(--red-bg); border:1px solid var(--red-line); color:var(--red); border-radius:8px; padding:12px 16px; font-size:13px; margin-bottom:18px;}
 
   .status-banner{border-radius:8px 8px 0 0; padding:18px 22px; color:#fff; display:flex; align-items:center; gap:14px;}
@@ -122,7 +139,7 @@
 
   .meta-row{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:10px; flex-wrap:wrap; gap:6px;}
   .meta-row b{color:var(--ink); font-family:var(--mono);}
-  .chart-card{background:var(--card-alt); border:none; border-radius:8px; padding:14px 16px; margin-bottom:18px;}
+  .chart-card{position:relative; background:var(--card-alt); border:none; border-radius:8px; padding:14px 16px; margin-bottom:18px;}
   .chart-legend{display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:8px;}
   .chart-legend span{display:inline-flex; align-items:center; gap:6px;}
   .chart-legend .dot{width:9px; height:9px; border-radius:50%; display:inline-block;}
@@ -202,6 +219,14 @@
 
     <div class="meta-prov" id="meta-provenance" style="display:none;"></div>
 
+
+    <div class="chart-card" id="chart-card">
+      <div class="chart-legend" id="chart-legend"></div>
+      <div id="chart-svg-container"></div>
+      <button id="chart-zoom-reset" onclick="resetChartZoom()" style="display:none;">↺ Reset zoom</button>
+      <div id="chart-popup" style="display:none;"></div>
+    </div>
+
     <div class="range-controls" id="range-controls" style="display:none;">
       <span class="rc-label">Focus:</span>
       <select id="range-day"></select>
@@ -211,11 +236,6 @@
       <button class="rc-btn" onclick="applyRange()">Re-run on selection</button>
       <button class="rc-btn ghost" onclick="clearRange()">Full range</button>
       <span class="rc-note" id="range-note"></span>
-    </div>
-
-    <div class="chart-card" id="chart-card">
-      <div class="chart-legend" id="chart-legend"></div>
-      <div id="chart-svg-container"></div>
     </div>
 
     <div class="status-banner" id="status-banner">
@@ -1297,10 +1317,10 @@ function runDiagnostic(parsed) {
           sources: [CITATIONS.ctCross, CITATIONS.enphaseCt, CITATIONS.sandia] });
         if (windowConcerning) {
           const ws = parseTimeSafe(worstWindow.startTime), we = parseTimeSafe(worstWindow.endTime);
-          if (ws && we) highlights.push({ startMs: ws.getTime(), endMs: we.getTime(), color: 'red', label: `flagged window (${worstWindow.r.toFixed(2)})` });
+          if (ws && we) highlights.push({ startMs: ws.getTime(), endMs: we.getTime(), color: 'red', label: `flagged window (${worstWindow.r.toFixed(2)})`, itemUid: items.length - 1 });
         } else if (dayConcerning) {
           const d0 = new Date(worstDay.day + 'T00:00:00');
-          if (!isNaN(d0.getTime())) highlights.push({ startMs: d0.getTime(), endMs: d0.getTime() + 86399000, color: 'red', label: `flagged day (${worstDay.r.toFixed(2)})` });
+          if (!isNaN(d0.getTime())) highlights.push({ startMs: d0.getTime(), endMs: d0.getTime() + 86399000, color: 'red', label: `flagged day (${worstDay.r.toFixed(2)})`, itemUid: items.length - 1 });
         }
       } else if (worstWindow && worstWindow.highConfidence) {
         items.push({ type:'confirmed',
@@ -1391,7 +1411,7 @@ function runDiagnostic(parsed) {
       const sudden = suddenCutoffDetected;
 
       for (const fc of effectiveFlaggedFlats) {
-        if (fc.result.startTime && fc.result.endTime) highlights.push({ startMs: fc.result.startTime.getTime(), endMs: fc.result.endTime.getTime(), color: 'amber', label: fc.label + ' flat' });
+        if (fc.result.startTime && fc.result.endTime) highlights.push({ startMs: fc.result.startTime.getTime(), endMs: fc.result.endTime.getTime(), color: 'amber', label: fc.label + ' flat', itemUid: items.length });
       }
       const timeline = classifyTimelinePosition(effectiveFlaggedFlats[0].result);
 
@@ -1493,6 +1513,11 @@ function runDiagnostic(parsed) {
       plainSummary: 'Something substantial runs in the small hours at this home — most commonly an EV charger. Not a fault indicator; the verdict is unaffected.',
       sources: [CITATIONS.eiaUse, CITATIONS.eiaHourly] });
   }
+
+  // Stable ids: cards are sorted issues-first at render time, so anchors and
+  // chart-popup links key on a uid assigned in creation order, not on the
+  // rendered position.
+  items.forEach((it, i) => { it.uid = i; });
 
   // ---------- Provenance: what data this report actually reviewed ----------
   const dayKeysSeen = new Set();
@@ -4394,6 +4419,8 @@ uploadCard.addEventListener('drop', (e) => {
 });
 
 let __lastParsed = null;
+let __currentChart = null;
+let __chartZoom = null;
 
 function handleFile(file) {
   const reader = new FileReader();
@@ -4471,6 +4498,89 @@ function clearRange() {
   document.getElementById('range-controls').style.display = 'flex';
 }
 
+// ---------- Chart zoom + issue popup ----------
+function zoomToHighlight(idx, anchorX, anchorY) {
+  if (!__currentChart || !__currentChart.highlights[idx]) return;
+  const hl = __currentChart.highlights[idx];
+  const width = hl.endMs - hl.startMs;
+  const margin = Math.max(Math.round(width * 0.25), 30 * 60000); // ≥30min context either side
+  __chartZoom = { startMs: hl.startMs - margin, endMs: hl.endMs + margin, hlIdx: idx };
+  renderChart(__currentChart.points, __currentChart.mode, __currentChart.highlights, __chartZoom);
+  const zr = document.getElementById('chart-zoom-reset'); if (zr) zr.style.display = 'inline-block';
+  showChartPopup(hl, anchorX, anchorY);
+}
+
+function resetChartZoom() {
+  if (!__currentChart) return;
+  __chartZoom = null;
+  hideChartPopup();
+  renderChart(__currentChart.points, __currentChart.mode, __currentChart.highlights);
+  const zr = document.getElementById('chart-zoom-reset'); if (zr) zr.style.display = 'none';
+}
+
+function showOnChart(idx) {
+  const card = document.getElementById('chart-card');
+  if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  zoomToHighlight(idx);
+}
+
+function showChartPopup(hl, anchorX, anchorY) {
+  const pop = document.getElementById('chart-popup');
+  const item = (__currentChart.items || []).find(it => it.uid === hl.itemUid);
+  const lookFor = hl.color === 'red'
+    ? "Watch how the Load line mirrors PV's swings inside this band — an independent household load has no ordinary reason to do that."
+    : 'This channel holds abnormally flat through this band — the dropout region.';
+  pop.innerHTML = `
+    <div class="pop-tag ${hl.color === 'red' ? 'issue' : 'info'}">${hl.label}</div>
+    ${item ? `<div class="pop-headline">${item.headline}</div>` : ''}
+    ${item && item.measured ? `<div class="pop-measured">${item.measured}</div>` : ''}
+    <div class="pop-lookfor">${lookFor}</div>
+    <div class="pop-actions">
+      ${item ? `<a href="#item-${item.uid}" onclick="hideChartPopup()">Full details ↓</a>` : ''}
+      <a href="#chart-card" onclick="rerunOnZoom();return false;">Re-run diagnostics on this window</a>
+      <a href="#chart-card" onclick="hideChartPopup();return false;">Close ✕</a>
+    </div>`;
+  pop.style.borderLeftColor = hl.color === 'red' ? 'var(--red)' : 'var(--amber)';
+  pop.style.display = 'block';
+  const cardEl = document.getElementById('chart-card');
+  const maxLeft = Math.max(8, (cardEl.clientWidth || 720) - 300);
+  pop.style.left = Math.min(anchorX !== undefined ? anchorX : 60, maxLeft) + 'px';
+  pop.style.top = (anchorY !== undefined ? Math.min(anchorY, 130) : 34) + 'px';
+}
+
+function hideChartPopup() {
+  const pop = document.getElementById('chart-popup');
+  if (pop) { pop.style.display = 'none'; pop.innerHTML = ''; }
+}
+
+// The explicit deep-dive: re-runs the FULL diagnostic on the zoomed window.
+// This is the only path where chart interaction changes the report, and the
+// user asks for it by name.
+function rerunOnZoom() {
+  if (!__lastParsed || !__chartZoom) return;
+  const z = __chartZoom;
+  const pts = __lastParsed.parsed.points.filter(p => { const t = parseTimeSafe(p.time); return t && t.getTime() >= z.startMs && t.getTime() <= z.endMs; });
+  if (pts.length === 0) return;
+  const sub = Object.assign({}, __lastParsed.parsed, { points: pts });
+  renderReport(runDiagnostic(sub), sub, `${__lastParsed.filename} — focus: flagged window`);
+}
+
+// Delegated listeners: the SVG is re-rendered wholesale on every draw, so
+// listen on the stable container rather than the transient rects.
+document.getElementById('chart-svg-container').addEventListener('click', (e) => {
+  const rect = e.target.closest ? e.target.closest('rect[data-hl]') : null;
+  if (!rect) return;
+  const wrap = document.getElementById('chart-card').getBoundingClientRect();
+  zoomToHighlight(parseInt(rect.getAttribute('data-hl'), 10), e.clientX - wrap.left, e.clientY - wrap.top + 12);
+});
+document.addEventListener('click', (e) => {
+  const pop = document.getElementById('chart-popup');
+  if (!pop || pop.style.display === 'none') return;
+  if (pop.contains(e.target)) return;
+  if (e.target.closest && e.target.closest('rect[data-hl], .show-chart, #chart-zoom-reset')) return;
+  hideChartPopup();
+});
+
 // ---------- Built-in examples ----------
 function toggleExamples() {
   const panel = document.getElementById('examples-panel');
@@ -4494,7 +4604,14 @@ function showError(msg) { errorBox.textContent = msg; errorBox.style.display = '
 // a quick visual recreation of the original monitoring-portal chart, so the
 // data can be eyeballed alongside the automated findings rather than only
 // trusting the numbers.
-function renderChart(points, mode, highlights) {
+function renderChart(points, mode, highlights, zoom) {
+  // Visual-only zoom: renders a time slice of the SAME data — the report
+  // below is deliberately untouched, so exploring the chart can never make
+  // findings appear or vanish.
+  if (zoom) {
+    const inZoom = points.filter(p => { const t = parseTimeSafe(p.time); return t && t.getTime() >= zoom.startMs && t.getTime() <= zoom.endMs; });
+    if (inZoom.length >= 2) points = inZoom;
+  }
   const labels = {
     pv: mode === 'tesla_derived' ? 'Solar' : (mode==='legs_only'||mode==='whole_system'||mode==='whole_system_battery') ? 'Production' : 'PV',
     grid: mode === 'tesla_derived' ? 'Site' : 'Grid',
@@ -4534,7 +4651,9 @@ function renderChart(points, mode, highlights) {
   // itself, not just described in text.
   const sampleMs = sampled.map(p => { const t = parseTimeSafe(p.time); return t ? t.getTime() : null; });
   let bands = '';
+  let hlIdx = -1;
   for (const hl of (highlights || [])) {
+    hlIdx++;
     let first = -1, last = -1;
     for (let i = 0; i < sampleMs.length; i++) {
       if (sampleMs[i] === null) continue;
@@ -4543,7 +4662,7 @@ function renderChart(points, mode, highlights) {
     if (first === -1 || last <= first) continue;
     const bx = x(first), bw = Math.max(2, x(last) - x(first));
     const col = hl.color === 'red' ? 'var(--red)' : 'var(--amber)';
-    bands += `<rect x="${bx.toFixed(1)}" y="${padT}" width="${bw.toFixed(1)}" height="${plotH}" fill="${col}" opacity="0.10"/>`
+    bands += `<rect data-hl="${hlIdx}" x="${bx.toFixed(1)}" y="${padT}" width="${bw.toFixed(1)}" height="${plotH}" fill="${col}" opacity="0.10"><title>${hl.label} — click to zoom</title></rect>`
       + `<line x1="${bx.toFixed(1)}" y1="${padT}" x2="${bx.toFixed(1)}" y2="${padT + plotH}" stroke="${col}" stroke-width="1" opacity="0.5"/>`
       + `<line x1="${(bx + bw).toFixed(1)}" y1="${padT}" x2="${(bx + bw).toFixed(1)}" y2="${padT + plotH}" stroke="${col}" stroke-width="1" opacity="0.5"/>`
       + `<text x="${(bx + 3).toFixed(1)}" y="${padT + 10}" font-size="8.5" fill="${col}" font-family="Courier New, monospace">${hl.label}</text>`;
@@ -4625,6 +4744,10 @@ function renderReport(report, parsed, filename) {
     provEl.textContent = parts.join(' ');
     provEl.style.display = 'block';
   } else provEl.style.display = 'none';
+  __currentChart = { points: parsed.points, mode: parsed.mode, highlights: report.highlights || [], items: report.items };
+  __chartZoom = null;
+  hideChartPopup();
+  const zrBtn = document.getElementById('chart-zoom-reset'); if (zrBtn) zrBtn.style.display = 'none';
   renderChart(parsed.points, parsed.mode, report.highlights);
 
   const BANNER = {
@@ -4646,8 +4769,11 @@ function renderReport(report, parsed, filename) {
   const rank = { issue: 0, info: 1, confirmed: 2 };
   const ordered = [...report.items].sort((a, b) => (rank[a.type] ?? 3) - (rank[b.type] ?? 3));
 
+  const hlByUid = {};
+  (report.highlights || []).forEach((h, idx) => { if (h.itemUid !== undefined && hlByUid[h.itemUid] === undefined) hlByUid[h.itemUid] = idx; });
+
   document.getElementById('quick-lines').innerHTML = ordered.map((it, i) => `
-    <a class="quick-line" href="#item-${i}">
+    <a class="quick-line" href="#item-${it.uid ?? i}">
       <span class="bullet ${it.type}">${bulletFor[it.type]}</span>
       <span class="line-text"><b>${it.headline}</b> → ${it.resolution}</span>
       <span class="jump">Details ↓</span>
@@ -4657,8 +4783,9 @@ function renderReport(report, parsed, filename) {
     const rec = (it.recommendation || '').trim();
     const showRec = rec && !/^none\.?$/i.test(rec);
     return `
-    <div class="detail-card ${it.type}" id="item-${i}">
+    <div class="detail-card ${it.type}" id="item-${it.uid ?? i}">
       <h3><span class="tag">${tagFor[it.type]}</span> ${it.headline}</h3>
+      ${hlByUid[it.uid] !== undefined ? `<div class="show-chart-row"><a class="show-chart" href="#chart-card" onclick="showOnChart(${hlByUid[it.uid]});return false;">🔍 Show on chart</a></div>` : ''}
       ${it.measured ? `<div class="measured">${it.measured}</div>` : ''}
       <div class="label">What I'm seeing</div>
       <p>${it.seeing}</p>
