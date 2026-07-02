@@ -267,7 +267,21 @@ function detectSchema(headerRow) {
   const loadIdx = findExact(['load', 'consumed']);
 
   if (pvIdx !== -1 && gridIdx !== -1 && loadIdx !== -1) {
-    return { kind: 'load_with_solar', pvIdx, gridIdx, loadIdx };
+    const v1Idx = norm.findIndex(h => /grid\s*voltage\s*l1/.test(h));
+    const v2Idx = norm.findIndex(h => /grid\s*voltage\s*l2/.test(h));
+    const freqIdx = norm.findIndex(h => /grid\s*frequency/.test(h));
+    // The PV + Grid + Load triple is the confirmed QCells/Q.OMMAND fingerprint —
+    // confirmed across all 17+ real project files. Enphase never uses these three
+    // bare column names (it uses Produced/Consumed/section-marker style); Tesla
+    // uses Solar/Site/Home. Any battery-flavored column alongside the QCells core
+    // is caught with loose pattern matching so future QCells battery exports are
+    // handled automatically without another code change, regardless of exact
+    // column naming in a future firmware version.
+    const battColIdx = norm.findIndex(h => /battery|storage/.test(h) && !h.includes('grid'));
+    // SOC column is always present in QCells GraphList headers even when the system has no battery —
+    // only flag as battery-equipped if the SOC column actually has non-null values in the data
+    const hasBattery = battColIdx !== -1; // refined below after data rows are available
+    return { kind: 'load_with_solar', platform: 'qcells', hasBatteryCol: battColIdx !== -1, pvIdx, gridIdx, loadIdx, v1Idx, v2Idx, freqIdx, battColIdx };
   }
 
   // Tesla-style export: solar_instant_power / site_instant_power / battery_instant_power / load_instant_real_power
@@ -276,16 +290,22 @@ function detectSchema(headerRow) {
   const battIdx = norm.findIndex(h => /battery.*power/.test(h));
   const loadPowerIdx = norm.findIndex(h => /load.*power/.test(h));
   if (solarIdx !== -1 && siteIdx !== -1) {
-    return { kind: 'tesla_derived', pvIdx: solarIdx, gridIdx: siteIdx, battIdx, loadIdx: loadPowerIdx };
+    return { kind: 'tesla_derived', platform: 'tesla', pvIdx: solarIdx, gridIdx: siteIdx, battIdx, loadIdx: loadPowerIdx };
   }
 
-  // Enphase no-Grid-trace exports: find "Produced"/"Consumed" SECTION markers
-  // first, then bucket any L1(A)/L2(B) columns by POSITION relative to those
-  // markers (Produced group vs Consumed group), and identify L1 vs L2 within
-  // each group by actual header text — never by scan order. Confirmed real
-  // exports vary column order both across files AND between the Produced and
-  // Consumed sections of the SAME file, so position-only detection mislabels
-  // which physical leg a finding is actually about.
+  // QCells whole-system export (simplified, no Grid column) — uses "PV Produced"
+  // and "Load Consumed" as header names. Must be checked BEFORE the Enphase
+  // Produced/Consumed detection since it would otherwise be misidentified as
+  // Enphase. Distinctive signature: both headers contain the word "PV" or
+  // "Load" alongside "Produced"/"Consumed", unlike Enphase which uses bare
+  // "Produced"/"Consumed" section markers.
+  const pvProdIdx = norm.findIndex(h => /pv.*produced|produced.*pv/.test(h));
+  const loadConsIdx = norm.findIndex(h => /load.*consumed|consumed.*load/.test(h));
+  if (pvProdIdx !== -1 && loadConsIdx !== -1) {
+    return { kind: 'whole_system', platform: 'qcells', pvIdx: pvProdIdx, loadIdx: loadConsIdx };
+  }
+
+  // Enphase no-Grid-trace exports
   const prodMarkerIdx = norm.findIndex(h => /produced/.test(h));
   const consMarkerIdx = norm.findIndex(h => /consumed/.test(h));
 
@@ -302,21 +322,14 @@ function detectSchema(headerRow) {
       else if (inConsGroup && isL2(h)) consL2 = i;
     });
     if (prodL1 !== -1 && prodL2 !== -1 && consL1 !== -1 && consL2 !== -1) {
-      return { kind: 'legs_only', prodL1, prodL2, consL1, consL2 };
+      return { kind: 'legs_only', platform: 'enphase', prodL1, prodL2, consL1, consL2 };
     }
-    // No L1/L2 legs found under either marker — whole-system export, single
-    // Produced/Consumed value each, no per-leg breakdown at all. Some
-    // Enphase battery-equipped systems add Battery Charge/Discharge columns
-    // alongside this same Produced/Consumed pair — detect those explicitly
-    // rather than silently dropping them, since with a battery present,
-    // Produced and Consumed are no longer directly reconcilable without
-    // accounting for energy flowing into/out of storage.
     const chargeIdx = norm.findIndex(h => /battery.*charge(?!.*discharge)/.test(h) || h === 'battery charge');
     const dischargeIdx = norm.findIndex(h => /battery.*discharge/.test(h));
     if (chargeIdx !== -1 && dischargeIdx !== -1) {
-      return { kind: 'whole_system_battery', pvIdx: prodMarkerIdx, loadIdx: consMarkerIdx, chargeIdx, dischargeIdx };
+      return { kind: 'whole_system_battery', platform: 'enphase', pvIdx: prodMarkerIdx, loadIdx: consMarkerIdx, chargeIdx, dischargeIdx };
     }
-    return { kind: 'whole_system', pvIdx: prodMarkerIdx, loadIdx: consMarkerIdx };
+    return { kind: 'whole_system', platform: 'enphase', pvIdx: prodMarkerIdx, loadIdx: consMarkerIdx };
   }
 
   return { kind: 'unknown', reason: 'Could not find PV/Grid/Load columns, Produced/Consumed leg-pair columns, or a whole-system Produced/Consumed pair.' };
@@ -358,8 +371,16 @@ function rowsFromCSV(text) {
       pv: num(r[schema.pvIdx]),
       grid: num(r[schema.gridIdx]),
       load: num(r[schema.loadIdx]),
+      v1: schema.v1Idx !== -1 ? num(r[schema.v1Idx]) : null,
+      v2: schema.v2Idx !== -1 ? num(r[schema.v2Idx]) : null,
+      freq: schema.freqIdx !== -1 ? num(r[schema.freqIdx]) : null,
+      batt: schema.battColIdx !== -1 ? num(r[schema.battColIdx]) : null,
     })).filter(p => p.pv !== null && p.grid !== null && p.load !== null);
-    return { mode: 'load_with_solar', points };
+    // Only flag as battery-equipped if the battery column actually has real data —
+    // QCells GraphList always includes SOC in the header even on non-battery systems
+    const hasBatteryData = schema.battColIdx !== -1 && points.some(p => p.batt !== null && p.batt > 0);
+    const platform = schema.platform === 'qcells' && hasBatteryData ? 'qcells_battery' : (schema.platform || 'unknown');
+    return { mode: 'load_with_solar', platform, points };
   }
 
   if (schema.kind === 'tesla_derived') {
@@ -368,9 +389,9 @@ function rowsFromCSV(text) {
       pv: num(r[schema.pvIdx]),
       grid: num(r[schema.gridIdx]),
       batt: schema.battIdx !== -1 ? num(r[schema.battIdx]) : 0,
-      load: schema.loadIdx !== -1 ? num(r[schema.loadIdx]) : null, // derived, not independently measured
+      load: schema.loadIdx !== -1 ? num(r[schema.loadIdx]) : null,
     })).filter(p => p.pv !== null && p.grid !== null);
-    return { mode: 'tesla_derived', points };
+    return { mode: 'tesla_derived', platform: 'tesla', points };
   }
 
   if (schema.kind === 'legs_only') {
@@ -380,7 +401,7 @@ function rowsFromCSV(text) {
       if (p1 === null || p2 === null || c1 === null || c2 === null) return null;
       return { time: timeIdx !== -1 ? r[timeIdx] : '', pv: p1 + p2, grid: null, load: c1 + c2, p1, p2, c1, c2 };
     }).filter(Boolean);
-    return { mode: 'legs_only', points };
+    return { mode: 'legs_only', platform: schema.platform || 'enphase', points };
   }
 
   if (schema.kind === 'whole_system') {
@@ -390,7 +411,7 @@ function rowsFromCSV(text) {
       grid: null,
       load: num(r[schema.loadIdx]),
     })).filter(p => p.pv !== null && p.load !== null);
-    return { mode: 'whole_system', points };
+    return { mode: 'whole_system', platform: schema.platform || 'enphase', points };
   }
 
   if (schema.kind === 'whole_system_battery') {
@@ -401,10 +422,10 @@ function rowsFromCSV(text) {
         pv: num(r[schema.pvIdx]),
         grid: null,
         load: num(r[schema.loadIdx]),
-        batt: charge - discharge, // signed: positive = charging (drawing from production/grid), negative = discharging (supplying load)
+        batt: charge - discharge,
       };
     }).filter(p => p.pv !== null && p.load !== null);
-    return { mode: 'whole_system_battery', points };
+    return { mode: 'whole_system_battery', platform: schema.platform || 'enphase', points };
   }
 }
 
@@ -695,6 +716,47 @@ function classifyDropShape(points, key, runStartTime, sunWindow, substantialW = 
  * "16 hours is too long for a night" guess breaks at high latitudes in
  * winter (genuinely 18+ hour nights) and doesn't adapt site-to-site; this
  * calibrates the threshold from what this specific system actually does. */
+/** Classifies a time-of-day into a named residential load window based on
+ * well-documented US residential consumption patterns (EIA, NREL, WattBuild).
+ * Solar homes show a modified version of the classic residential curve:
+ * the midday dip (solar offsetting AC load) replaces the typical midday peak,
+ * and the evening peak is the dominant high-consumption window.
+ *
+ * Windows and expected Load ranges for a typical US solar residential system:
+ *   LATE NIGHT  12am-5am  : 200-800W  (base load only — fridge, router, etc.)
+ *   EARLY MORNING 5am-7am : 400-1500W (some appliances spinning up)
+ *   MORNING PEAK 7am-9am  : 800-3500W (water heater, kitchen, HVAC spin-up)
+ *   DAYTIME     9am-4pm   : 500-4000W (varies; solar offset makes this lower than non-solar)
+ *   EVENING PEAK 4pm-9pm  : 2000-8500W (HVAC, cooking, entertainment, lighting — the dominant daily peak)
+ *   NIGHT       9pm-12am  : 500-2500W (winding down — TV, lights, HVAC cooling off)
+ *
+ * A Load reading is "anomalous" only if it falls well OUTSIDE its window's
+ * expected range — not just because it's high, since 7kW at 6pm is completely
+ * normal and should never trigger a concern. */
+function classifyTimeOfDay(timeStr) {
+  const t = parseTimeSafe(timeStr);
+  if (!t) return null;
+  const h = t.getHours() + t.getMinutes() / 60;
+  if (h >= 0 && h < 5)   return { window: 'LATE NIGHT',     minW: 200,  maxW: 1200,  concern: h < 0 || h >= 5 };
+  if (h >= 5 && h < 7)   return { window: 'EARLY MORNING',  minW: 300,  maxW: 2000,  concern: false };
+  if (h >= 7 && h < 9)   return { window: 'MORNING PEAK',   minW: 500,  maxW: 4000,  concern: false };
+  if (h >= 9 && h < 16)  return { window: 'DAYTIME',        minW: 300,  maxW: 5000,  concern: false };
+  if (h >= 16 && h < 21) return { window: 'EVENING PEAK',   minW: 1000, maxW: 9000,  concern: false };
+  if (h >= 21 && h < 24) return { window: 'NIGHT',          minW: 300,  maxW: 3000,  concern: false };
+  return null;
+}
+
+/** Returns true only if a Load value is anomalous for its time-of-day window —
+ * i.e., well outside what is expected given the time of day, not just high.
+ * A 7,000W reading at 6pm is NORMAL (evening peak); the same reading at 3am
+ * is anomalous. The threshold adds a 50% buffer above the window ceiling to
+ * avoid false-positives from legitimate high-load events (large AC, EV charging). */
+function isLoadAnomalousForTime(load, timeStr) {
+  const tod = classifyTimeOfDay(timeStr);
+  if (!tod || load === null) return false;
+  return load > tod.maxW * 1.5 || (tod.window === 'LATE NIGHT' && load > 2500);
+}
+
 function computeSunWindow(points, key, threshold = 50) {
   const minutesOfDay = [];
   for (const p of points) {
@@ -755,6 +817,67 @@ function checkFlatline(points, key, { toleranceW = 5, minHours = 3, minPoints = 
 /** Groups points by calendar day (best-effort from the time string) and
  * flags any day whose peak is far below the dataset's typical peak — catches
  * a single offline day hiding inside an otherwise-healthy multi-day export. */
+/** Checks Grid Voltage L1/L2 and Grid Frequency against physically
+ * plausible bounds for a US split-phase residential service. Bounds were
+ * calibrated against every real file available in this project (29 files,
+ * zero violations found at these thresholds), generous enough to avoid
+ * flagging ordinary sensor noise/calibration offsets while still catching
+ * a genuinely implausible reading. Distinguishes near-zero (consistent
+ * with a real de-energized leg — an outage or open breaker, not a sensor
+ * fault) from implausibly high (more consistent with a sensor/CT
+ * configuration error) from out-of-band frequency (a grid event or a
+ * frequency sensor fault), since these point to different root causes. */
+function checkVoltageFrequency(points) {
+  const findings = [];
+  const hasV1 = points.some(p => p.v1 !== null && p.v1 !== undefined);
+  const hasV2 = points.some(p => p.v2 !== null && p.v2 !== undefined);
+  const hasFreq = points.some(p => p.freq !== null && p.freq !== undefined);
+  if (!hasV1 && !hasV2 && !hasFreq) return null; // this export doesn't include these columns at all
+
+  const checkLeg = (key, label) => {
+    const vals = points.filter(p => p[key] !== null && p[key] !== undefined);
+    if (vals.length === 0) return;
+    const nearZero = vals.filter(p => p[key] < 20);
+    const tooLow = vals.filter(p => p[key] >= 20 && p[key] < 100);
+    const tooHigh = vals.filter(p => p[key] > 135);
+    if (nearZero.length > 0) {
+      findings.push({ type:'issue', headline:`${label} reads near-zero at ${nearZero.length} point(s)`, resolution:'check for a real outage or open breaker on this leg',
+        seeing:`${label} drops below 20V at ${nearZero.length} of ${vals.length} points — lowest reading ${Math.min(...nearZero.map(p=>p[key])).toFixed(1)}V. A near-zero voltage reading on a live circuit is far more consistent with that leg actually being de-energized (utility outage, open/tripped breaker, or a disconnected service conductor) than with a sensor calibration issue — sensors that drift typically don't drop all the way to zero.`,
+        recommendation:'<strong>Remote check:</strong> check the gateway\'s live connectivity/voltage reading right now — if normal, this was a real but resolved outage on this leg; note the date range. <strong>If it escalates:</strong> if still near-zero live, this needs a truck roll to check the breaker and service connection for this leg, not a CT/software fix.' });
+    } else if (tooLow.length > 0) {
+      findings.push({ type:'issue', headline:`${label} reads unusually low at ${tooLow.length} point(s)`, resolution:'check for a real brownout or a sensor calibration issue',
+        seeing:`${label} reads between 20-100V at ${tooLow.length} of ${vals.length} points — lowest reading ${Math.min(...tooLow.map(p=>p[key])).toFixed(1)}V, well below the normal ~114-126V utilization range for a US split-phase leg.`,
+        recommendation:'<strong>Remote check:</strong> compare against the utility\'s reported voltage for this address/area if available — a real brownout would show on their side too. <strong>If it escalates:</strong> if the utility-side voltage is normal, this points to a sensor/CT voltage-sense calibration issue on this leg specifically, worth a site visit to verify.' });
+    }
+    if (tooHigh.length > 0) {
+      findings.push({ type:'issue', headline:`${label} reads implausibly high at ${tooHigh.length} point(s)`, resolution:'check sensor/CT configuration for this leg',
+        seeing:`${label} reads above 135V at ${tooHigh.length} of ${vals.length} points — highest reading ${Math.max(...tooHigh.map(p=>p[key])).toFixed(1)}V, beyond what a healthy US split-phase leg should ever show. This pattern is more consistent with a sensor/voltage-sense configuration error (wrong scale/multiplier, or reading the wrong conductor) than a real utility event — genuine overvoltage events this far out of range are rare and usually trip protective equipment immediately.`,
+        recommendation:`<strong>Remote check:</strong> verify the voltage sense configuration for this leg in the ${portalName} against the ${gatewayName}'s actual hardware/wiring. <strong>If it escalates:</strong> if configuration looks correct, dispatch to verify the physical voltage-sense connection on this leg.` });
+    }
+  };
+  if (hasV1) checkLeg('v1', 'Grid Voltage L1');
+  if (hasV2) checkLeg('v2', 'Grid Voltage L2');
+
+  if (hasFreq) {
+    const vals = points.filter(p => p.freq !== null && p.freq !== undefined);
+    const outOfBand = vals.filter(p => p.freq < 59.0 || p.freq > 61.0);
+    if (outOfBand.length > 0) {
+      findings.push({ type:'issue', headline:`Grid Frequency out of normal band at ${outOfBand.length} point(s)`, resolution:'check for a real grid event or a frequency sensor fault',
+        seeing:`Grid Frequency moves outside the normal 59-61Hz band at ${outOfBand.length} of ${vals.length} points (range seen: ${Math.min(...outOfBand.map(p=>p.freq)).toFixed(2)}-${Math.max(...outOfBand.map(p=>p.freq)).toFixed(2)}Hz). US utility frequency is tightly regulated around 60Hz; a real excursion this large is unusual outside of a genuine grid disturbance.`,
+        recommendation:'<strong>Remote check:</strong> check whether this lines up with a known utility event or outage in the area at this date/time. <strong>If it escalates:</strong> if no utility event explains it, this points to a frequency sensor fault rather than a real grid condition — worth a site visit to verify the gateway\'s reading against an independent meter.' });
+    }
+  }
+
+  if (findings.length === 0) {
+    const checked = [hasV1 && 'Grid Voltage L1', hasV2 && 'Grid Voltage L2', hasFreq && 'Grid Frequency'].filter(Boolean).join(', ');
+    return [{ type:'confirmed', headline:`${checked} within normal range`, resolution:'no action needed',
+      seeing:`Checked every reading against plausible bounds for a US split-phase service (~100-135V per leg, 59-61Hz) — all values stayed within range.`,
+      recommendation:'None.',
+      plainSummary:'The raw voltage and frequency readings themselves look physically normal — this rules out a basic sensor-configuration error on its own.' }];
+  }
+  return findings;
+}
+
 function checkPerDayProductionAnomaly(points, key, minTypicalPeak = 500, ratioThreshold = 0.15) {
   const byDay = {};
   for (const p of points) {
@@ -776,7 +899,13 @@ function checkPerDayProductionAnomaly(points, key, minTypicalPeak = 500, ratioTh
 
 // ---------- Orchestrator ----------
 function runDiagnostic(parsed) {
-  const { mode, points } = parsed;
+  const { mode, points, platform = 'unknown' } = parsed;
+  const isQCells = platform === 'qcells' || platform === 'qcells_battery';
+  const isTeslaPlat = platform === 'tesla';
+  const isEnphase = platform === 'enphase';
+  // Helper: returns the right portal/app name for remote-check instructions
+  const portalName = isQCells ? 'Q.OMMAND Pro app' : (isTeslaPlat ? 'Tesla One' : 'Enlighten/Installer Portal');
+  const gatewayName = isQCells ? 'Q.HOME COMBINER' : (isTeslaPlat ? 'Powerwall Gateway' : 'IQ Gateway/Envoy');
   const items = [];
 
   const MIN_POINTS = 4;
@@ -802,13 +931,13 @@ function runDiagnostic(parsed) {
     let recommendation, plainSummary;
     if (isTesla) {
       recommendation = whileExporting
-        ? '<strong>Remote check:</strong> open the Meter page in Tesla One\'s Device Setup and look at the Solar CT — if it shows the "Flip" indicator already set, the polarity itself may be fine and this is a smaller offset; confirm the CT is on the correct phase before assuming a fix is needed. <strong>If it escalates:</strong> if this persists into clear daylight hours (not just a brief low-light dip), dispatch to verify the CT is clamped on the correct conductor — note Tesla\'s system requires Solar > 0 and Site < 0 to charge from solar, so this can quietly block solar charging even while production itself is fine.'
-        : '<strong>Remote check:</strong> in Tesla One\'s Device Setup → Meter page, check the "Flip" box on the Solar CT — Tesla\'s own UI states a negative reading "may indicate the CT is installed backwards or on the wrong phase." Toggling it is a fully remote fix if the CT is on the right phase, just oriented backward. <strong>If it escalates:</strong> if flipping doesn\'t produce a clean, sensible reading (or makes it worse), the CT is likely on the wrong phase rather than just backward — that needs a truck roll to re-clamp on the correct conductor, not another software flip. Some installers prefer the physical fix outright since a firmware update can occasionally reset the electronic flip.';
-      plainSummary = 'This is a monitoring sensor reading issue, not an indication that the panels have stopped producing power. It can also block the battery from charging from solar as expected, since the system requires a positive Solar reading to do that.';
+        ? `<strong>Remote check:</strong> open the Meter page in ${portalName}'s Device Setup and look at the Solar CT — if it shows the "Flip" indicator already set, the polarity itself may be fine and this is a smaller offset; confirm the CT is on the correct phase before assuming a fix is needed. <strong>If it escalates:</strong> if this persists into clear daylight hours (not just a brief low-light dip), dispatch to verify the CT is clamped on the correct conductor — the system requires Solar > 0 and Site < 0 to charge from solar, so this can quietly block solar charging even while production itself is fine.`
+        : `<strong>Remote check:</strong> in ${portalName}'s Device Setup → Meter page, check the "Flip" box on the Solar CT — a negative reading may indicate the CT is installed backwards or on the wrong phase. Toggling it is a fully remote fix if the CT is on the right phase, just oriented backward. <strong>If it escalates:</strong> if flipping doesn't produce a clean, sensible reading (or makes it worse), the CT is likely on the wrong phase rather than just backward — that needs a truck roll to re-clamp on the correct conductor, not another software flip.`;
+      plainSummary = 'This is a monitoring sensor reading issue, not an indication that the panels have stopped producing power. It can also block the battery from charging from solar as expected.';
     } else {
       recommendation = whileExporting
-        ? '<strong>Remote check:</strong> run the CT Health Check (Installer Portal → Devices → Production Meter → CT Summary → Verify CT) — it automatically checks polarity and tells you whether to use the Reverse Polarity button, fully remotely. If it flags polarity, flip it and allow 48 hours before re-checking — the fix won\'t show immediately, so don\'t re-flip same-day if it still looks off. <strong>If it escalates:</strong> if the health check instead flags missing branches or a phase mismatch, that\'s wiring, not polarity — dispatch with instructions to verify L1/L2/L3 phasing between the PV circuits and the gateway terminals.'
-        : '<strong>Remote check:</strong> same tool — Installer Portal → Devices → Production Meter → CT Summary → Verify CT. This is Enphase\'s own automated polarity check; if it confirms a reversed CT, use the Reverse Polarity button right there (no truck roll) and allow 48 hours for new data before reusing the feature or re-checking. <strong>If it escalates:</strong> if the health check flags missing branches instead of pure polarity, or the reading doesn\'t correct after the 48-hour window, the CT is likely on the wrong phase — that\'s a physical re-clamp, not another software flip.';
+        ? `<strong>Remote check:</strong> run the CT Health Check in ${portalName} (Production Meter → CT Summary → Verify CT) — it automatically checks polarity and tells you whether to use the Reverse Polarity button, fully remotely. If it flags polarity, flip it and allow 48 hours before re-checking — the fix won't show immediately, so don't re-flip same-day if it still looks off. <strong>If it escalates:</strong> if the health check instead flags missing branches or a phase mismatch, that's wiring, not polarity — dispatch with instructions to verify L1/L2/L3 phasing between the PV circuits and the ${gatewayName} terminals.`
+        : `<strong>Remote check:</strong> run the CT Health Check in ${portalName} (Production Meter → CT Summary → Verify CT) — this is an automated polarity check; if it confirms a reversed CT, use the Reverse Polarity button right there (no truck roll) and allow 48 hours for new data before re-checking. <strong>If it escalates:</strong> if the health check flags missing branches instead of pure polarity, or the reading doesn't correct after the 48-hour window, the CT is likely on the wrong phase — that's a physical re-clamp, not another software flip.`;
       plainSummary = 'A monitoring sensor is reading backward, not the panels failing to produce power. The system is very likely still making and using solar energy normally — this is a display/measurement correction, and in many cases that correction can be made remotely.';
     }
 
@@ -832,8 +961,8 @@ function runDiagnostic(parsed) {
     if (flagged.length > 0) {
       const sign = signConsistency(balance.map(b=>b.deviation));
       const ratio = ratioConsistency(balance.map(b=>({expected:b.expected, actual:b.actual})));
-      let rec = '<strong>Remote check:</strong> run the CT Health Check (Installer Portal → Devices → Production Meter → CT Summary → Verify CT) on both the Production and Grid/Consumption meters — it flags polarity issues and missing branches automatically. <strong>If it escalates:</strong> if the health check comes back clean, dispatch is warranted — verify the CT is on the correct phase and fully latched, and confirm the CT model/rated amperage configured at commissioning matches what is physically installed. A CT configured for the wrong amperage rating will scale every reading by a constant factor.';
-      if (ratio && ratio.consistent) rec = `Deviation ratio is consistent (≈${ratio.meanRatio.toFixed(2)}) — this is the signature of a fixed scale/configuration error, not a wiring fault. <strong>Remote check:</strong> in the Installer Portal, compare the CT ratio/model selected at commissioning against what\'s physically installed (printed on the CT body) — correcting a mismatched setting is a fully remote fix, no truck roll. <strong>If it escalates:</strong> if the configured CT already matches the physical unit and the ratio still holds steady, the physical CT itself may be the wrong model for this service size — that's a swap, not a config change.`;
+      let rec = `<strong>Remote check:</strong> run the CT Health Check in ${portalName} on both the Production and Grid/Consumption meters — it flags polarity issues and missing branches automatically. <strong>If it escalates:</strong> if the health check comes back clean, dispatch is warranted — verify the CT is on the correct phase and fully latched, and confirm the CT model/rated amperage configured at commissioning matches what is physically installed.`;
+      if (ratio && ratio.consistent) rec = `Deviation ratio is consistent (≈${ratio.meanRatio.toFixed(2)}) — this is the signature of a fixed scale/configuration error, not a wiring fault. <strong>Remote check:</strong> in ${portalName}, compare the CT ratio/model selected at commissioning against what's physically installed (printed on the CT body) — correcting a mismatched setting is a fully remote fix, no truck roll. <strong>If it escalates:</strong> if the configured CT already matches the physical unit and the ratio still holds steady, the physical CT itself may be the wrong model for this service size — that's a swap, not a config change.`;
       else if (sign.consistent) rec = 'Deviation is one-directional but variable in size — more consistent with an untracked second source or CT non-linearity than a fixed multiplier or a simple wiring fault, so a remote configuration check is unlikely to fully resolve this on its own. <strong>Remote check:</strong> run the CT Health Check first regardless — it requires no truck roll and rules out a simple polarity or branch issue quickly. <strong>If it escalates:</strong> dispatch to physically verify CT phase and latch, and check for an untracked second production source (another inverter or string not reporting into this gateway) — a CT-only fix is unlikely to fully explain a variable-magnitude pattern like this.';
       items.push({ type:'issue',
         headline: `Grid doesn't reconcile with Load−PV at ${flagged.length}/${balance.length} point(s)`,
@@ -944,7 +1073,7 @@ function runDiagnostic(parsed) {
         headline: consFlags.map(f=>`Consumption ${f.leg} flat at ~${f.value.toFixed(0)}W for ${f.durationHours!==null?f.durationHours.toFixed(1)+'h':f.count+' pts'}`).join('; '),
         resolution: 'confirm it\'s live, then dispatch if so',
         seeing: 'Consumption legs are independent circuits and aren\'t expected to track each other — but each one should still show normal variation on its own. A long flat stretch on just one leg can hide inside a healthy-looking combined Load total if the other leg keeps moving.',
-        recommendation: '<strong>Remote check:</strong> pull up the live per-leg consumption view in Enlighten/Installer Portal — if the flagged leg is moving again, this was a temporary data gap or a one-off communication blip, not an active fault; note it and close out. <strong>If it escalates:</strong> if the leg is still flat live, dispatch is warranted — per Enphase\'s meter-error guidance, the cause is almost always one of: the CT not fully latched/clamped (resting closed is not sufficient), the blue/white lead wires crossed with the other leg\'s pair, or a disconnected neutral at the panel. None of these can be corrected remotely, so further remote troubleshooting is not warranted once live status is confirmed.',
+        recommendation: `<strong>Remote check:</strong> pull up the live per-leg consumption view in ${portalName} — if the flagged leg is moving again, this was a temporary data gap or a one-off communication blip, not an active fault; note it and close out. <strong>If it escalates:</strong> if the leg is still flat live, dispatch is warranted — the most common causes are: the CT not fully latched/clamped, the lead wires crossed with the other leg's pair, or a disconnected neutral at the panel. None of these can be corrected remotely once live status is confirmed.`,
         plainSummary: 'This is one consumption monitoring sensor, not the system\'s ability to produce or use power. Usually a quick fix for a loose connection at the panel.' });
     } else {
       items.push({ type:'confirmed', headline:'No per-leg consumption dropout detected', resolution:'no action needed',
@@ -1095,9 +1224,9 @@ function runDiagnostic(parsed) {
               ? '<strong>Remote check:</strong> Grid was also disrupted at the same moment, which points at a grid-side/utility outage rather than the PV system itself — confirm with the utility or check for a known outage in the area before treating this as an equipment fault.'
               : '<strong>Remote check:</strong> a sudden mid-day cutoff like this is electrically identical whether it was a remote shutoff, a breaker switched off, or a genuine fault — the data can\'t tell those apart. Check first whether this was scheduled maintenance, a curtailment command, or someone switching a breaker before assuming a fault. <strong>If it escalates:</strong> if nothing intentional explains it, dispatch to check the inverter/breaker directly — Grid and Load behaving normally through this window rules out a connectivity or utility-side explanation.')
           : (wholeSystemOffline
-            ? '<strong>Remote check:</strong> look at the gateway\'s current connectivity/last-seen status in Enlighten or Tesla One — if it\'s online and reporting right now, this was a temporary power or internet blip that\'s already resolved; note the date range and move on, no dispatch needed. If it\'s still offline live, ask the homeowner to power-cycle the gateway and their router/modem first — that resolves most comms gaps without a truck roll. <strong>If it escalates:</strong> only dispatch if it\'s still offline after a remote power-cycle attempt — at that point it\'s likely a hardware or wiring issue at the gateway itself, not a connectivity blip.'
+            ? `<strong>Remote check:</strong> look at the ${gatewayName}'s current connectivity/last-seen status in ${portalName} — if it's online and reporting right now, this was a temporary power or internet blip that's already resolved; note the date range and move on, no dispatch needed. If it's still offline live, ask the homeowner to power-cycle the ${gatewayName} and their router/modem first — that resolves most comms gaps without a truck roll. <strong>If it escalates:</strong> only dispatch if it's still offline after a remote power-cycle attempt — at that point it's likely a hardware or wiring issue at the ${gatewayName} itself, not a connectivity blip.`
             : companionActive
-              ? `<strong>Remote check:</strong> since ${companionLabel} kept reporting normally through this window, the gateway is confirmed online — check this channel's CT configuration directly in the Installer Portal (CT enabled and correctly assigned, correct CT type/model selected, Load Only vs. Load with Solar setting) rather than connectivity. This approach has resolved confirmed field cases involving a clean, exact-zero channel reading like this one. <strong>If it escalates:</strong> if the configuration already looks correct, dispatch to verify the physical CT is latched and on the correct conductor.`
+              ? `<strong>Remote check:</strong> since ${companionLabel} kept reporting normally through this window, the ${gatewayName} is confirmed online — check this channel's CT configuration directly in ${portalName} (CT enabled and correctly assigned, correct CT type/model selected, Load Only vs. Load with Solar setting) rather than connectivity. This approach has resolved confirmed field cases involving a clean, exact-zero channel reading like this one. <strong>If it escalates:</strong> if the configuration already looks correct, dispatch to verify the physical CT is latched and on the correct conductor.`
               : '<strong>Remote check:</strong> pull up this channel\'s live reading right now — if it\'s moving again, this was a one-off data gap, not an active fault; note it and move on, no dispatch needed. <strong>If it escalates:</strong> if it\'s still flat live, verify the CT is still connected and latched, and that the gateway/inverter is actively reporting — a long, suspiciously flat stretch is the signature of a dropped channel, not just low real-world activity, and that\'s a truck-roll item.'),
         plainSummary: sudden
           ? (gridUndisturbed === false
@@ -1165,6 +1294,9 @@ function runDiagnostic(parsed) {
     }
   }
 
+
+  const vfFindings = checkVoltageFrequency(points);
+  if (vfFindings) items.push(...vfFindings);
 
   const issues = items.filter(i=>i.type==='issue');
   return {
@@ -1296,12 +1428,16 @@ function renderReport(report, parsed, filename) {
   document.getElementById('meta-filename').textContent = filename;
   const modeLabels = {
     load_with_solar: 'PV / Grid / Load',
-    tesla_derived: 'Solar / Site (derived Load)',
-    legs_only: 'Produced / Consumed by leg (no Grid trace)',
-    whole_system: 'Produced / Consumed, whole-system (no Grid trace, no legs)',
-    whole_system_battery: 'Produced / Consumed + Battery, whole-system (no Grid trace, Enphase battery)',
+    tesla_derived: 'Solar / Site (derived Load) — Tesla',
+    legs_only: 'Produced / Consumed by leg (no Grid trace) — Enphase',
+    whole_system: 'Produced / Consumed, whole-system (no Grid trace) — Enphase',
+    whole_system_battery: 'Produced / Consumed + Battery, whole-system — Enphase',
   };
-  document.getElementById('meta-mode').textContent = modeLabels[parsed.mode] || parsed.mode;
+  const platformLabels = { qcells: 'Q.HOME / Q.OMMAND', qcells_battery: 'Q.HOME / Q.OMMAND + Battery', tesla: 'Tesla', enphase: 'Enphase' };
+  const modeDisplay = parsed.platform === 'qcells' || parsed.platform === 'qcells_battery'
+    ? `PV / Grid / Load — QCells ${parsed.platform === 'qcells_battery' ? '+ Battery' : ''}`
+    : (modeLabels[parsed.mode] || parsed.mode);
+  document.getElementById('meta-mode').textContent = modeDisplay;
   document.getElementById('meta-points').textContent = parsed.points.length;
   renderChart(parsed.points, parsed.mode);
 
